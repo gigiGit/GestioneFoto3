@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestione Foto · Elaborazione</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="layout">
+    <header class="page-header">
+      <p class="eyebrow">GESTIONE FOTO</p>
+      <p class="intro">Scansione, archiviazione e backup delle fotografie.</p>
+    </header>
+
+    <form id="profile-form" class="panel profile-panel">
+      <div class="panel-heading">
+        <div class="section-heading">
+          <div class="profile-title-row">
+            <span class="profile-title"> Profilo</span>
+            <select id="saved-profiles">
+              <option value="">Seleziona un profilo</option>
+            </select>
+          </div>
+          
+        </div>
+        <button class="panel-toggle" type="button" aria-expanded="true" aria-controls="profile-content">Chiudi</button>
+      </div>
+
+      <div id="profile-content">
+        <section class="profile-fields" aria-label="Valori del profilo">
+          <label class="field">
+            <span>Nome profilo</span>
+            <input id="profile-name" name="name" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" required>
+          </label>
+          <label class="directory-picker">
+            <span>Cartella sorgente</span>
+            <input id="profile-source" name="sourceFolders" type="text" required>
+            <button class="secondary-button" type="button" data-directory-target="profile-source">Scegli...</button>
+          </label>
+          <label class="field">
+            <span>Cartella di destinazione</span>
+            <div class="directory-picker">
+              <input id="profile-dest" name="destDir" type="text" required>
+              <button class="secondary-button" type="button" data-directory-target="profile-dest">Scegli...</button>
+            </div>
+          </label>
+          <label class="directory-picker">
+            <span>Cartella scan</span>
+            <input id="profile-scan" name="scanDir" type="text" required>
+            <button class="secondary-button" type="button" data-directory-target="profile-scan">Scegli...</button>
+          </label>
+          <label class="directory-picker">
+            <span>Database archivio</span>
+            <input id="profile-archive" name="archive" type="text" required>
+            <button class="secondary-button" type="button" data-directory-target="profile-archive">Scegli...</button>
+          </label>
+          <label class="directory-picker">
+            <span>Cartella backup</span>
+            <input id="profile-backup" name="backupPath" type="text" required>
+            <button class="secondary-button" type="button" data-directory-target="profile-backup">Scegli...</button>
+          </label>
+          <label class="directory-picker">
+            <span>Cartella album</span>
+            <input id="profile-album" name="albumPath" type="text" required>
+            <button class="secondary-button" type="button" data-directory-target="profile-album">Scegli...</button>
+          </label>
+          <label class="field">
+            <span>File per scanfile</span>
+            <input id="profile-batch-size" name="batchSize" type="number" min="1" max="10000" required>
+          </label>
+          <label class="field">
+            <span>Dimensione minima (byte)</span>
+            <input id="profile-min-size" name="minSize" type="number" min="0" required>
+          </label>
+          <label class="field extension-field">
+            <span>Estensioni immagini</span>
+            <input id="profile-extensions" name="extensions" type="text" required>
+            <small>Separate da virgola, ad esempio .jpg, .png, .heic</small>
+          </label>
+          <label class="verbose-field">
+            <input id="profile-verbose" name="verbose" type="checkbox">
+            <span>Output dettagliato (verbose)</span>
+          </label>
+        </section>
+
+        <div class="actions profile-actions">
+          <button id="load-profile-button" class="secondary-button" type="button">Carica selezionato</button>
+          <button id="new-profile-button" class="secondary-button" type="button">Nuovo</button>
+          <button id="save-profile-button" type="submit">Salva profilo</button>
+          <span id="profile-status" class="status" role="status"></span>
+        </div>
+      </div>
+    </form>
+
+    <form id="job-form" class="panel">
+      <div class="panel-heading">
+        <h2>Elaborazione</h2>
+        <button class="panel-toggle" type="button" aria-expanded="true" aria-controls="job-content">Chiudi</button>
+      </div>
+      <div id="job-content">
+        <fieldset class="phases">
+          <legend>Fasi da eseguire, nell’ordine</legend>
+          <label><input type="checkbox" name="phase" value="scan" checked><button class="fase" onclick="runJob('scan')">1</button><span><strong>Scansione</strong><small id=""scansione-log">Trova immagini e crea scanfile JSON.</small></span></label>
+          <label><input type="checkbox" name="phase" value="exif" checked><button class="fase" onclick="runJob('exif')">2</button><span><strong>Lettura EXIF</strong><small>Legge le date dai metadati delle immagini.</small></span></label>
+          <label><input type="checkbox" name="phase" value="analyze" checked><button class="fase" onclick="runJob('analyze')">3</button><span><strong>Analisi date</strong><small>Determina la data valida dai metadati, dal nome o dalle cartelle.</small></span></label>
+          <label><input type="checkbox" name="phase" value="purge" checked><button class="fase" onclick="runJob('purge')">4</button><span><strong>Pulizia duplicati</strong><small>Elimina duplicati.</small></span></label>
+          <label><input type="checkbox" name="phase" value="thumbnail" checked><button class="fase" onclick="runJob('thumbnail')">5</button><span><strong>Miniature</strong><small>Genera le miniature per gli scanfile.</small></span></label>
+          <label><input type="checkbox" name="phase" value="archive" checked><button class="fase" onclick="runJob('archive')">6</button><span><strong>Archivio SQLite</strong><small>Inserisce i record nel database, un blocco transazionale per scanfile.</small></span></label>
+        </fieldset>
+
+        <div class="actions">
+          <button id="start-button" type="submit">Avvia elaborazione</button>
+          <span id="job-status" class="status" role="status">Pronto</span>
+        </div>
+      </div>
+    </form>
+    <form id="prv-form" class="panel">
+      <div class="panel-heading">
+        <h2>Preview</h2>
+        <button class="panel-toggle" type="button" aria-expanded="true" aria-controls="prv-content">Chiudi</button>
+      </div>
+      <div id="prv-control">
+        <div class="preview-filters">
+          <label class="preview-filter">
+            <span>Nome o percorso</span>
+            <input id="preview-search" type="search" maxlength="256" placeholder="Cerca nei record">
+          </label>
+          <label class="preview-filter">
+            <span>Estensione</span>
+            <input id="preview-extension" type="text" maxlength="11" placeholder=".jpg">
+          </label>
+          <label class="preview-filter">
+            <span>Data dal</span>
+            <input id="preview-date-from" type="date">
+          </label>
+          <label class="preview-filter">
+            <span>Data al</span>
+            <input id="preview-date-to" type="date">
+          </label>
+          <button id="preview-filter-button" type="button">Filtra</button>
+          <button id="preview-reset-button" class="secondary-button" type="button">Azzera</button>
+        </div>
+        <div class="preview-navigation">
+          <span id="preview-status" class="status" role="status" aria-live="polite"></span>
+          <div class="preview-page-controls">
+            <button id="preview-previous-button" class="secondary-button" type="button" disabled>Precedenti</button>
+            <button id="preview-next-button" class="secondary-button" type="button" disabled>Successivi</button>
+          </div>
+        </div>
+      </div>
+      <div id="prv-content" class="preview-grid" aria-live="polite"></div>
+      
+
+    </form>
+
+    <section class="panel log-panel" aria-labelledby="log-title">
+      <div class="panel-heading log-heading">
+        <div>
+          <h2 id="log-title">Attività</h2>
+          <span id="phase-status" class="phase-status"></span>
+        </div>
+        <button class="panel-toggle" type="button" aria-expanded="true" aria-controls="log-content">Chiudi</button>
+      </div>
+      <div id="log-content">
+        <ol id="job-log" class="log" aria-live="polite">
+          <li class="empty">I messaggi dell’elaborazione appariranno qui.</li>
+        </ol>
+      </div>
+    </section>
+
+    <p class="footnote">Il servizio resta in ascolto solo sul computer locale.</p>
+  </main>
+</body>
+
+</html>
