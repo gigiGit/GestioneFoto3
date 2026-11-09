@@ -70,7 +70,7 @@ export async function scan({ sourceDir, scanDir } = {}) {
         name,
         size: stats.size,
         createdAt: stats.ctime.toISOString(),
-        hash:null //await hashFile(filePath)
+        hash:await hashFile(filePath)
       });
 
       }

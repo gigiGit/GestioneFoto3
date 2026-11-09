@@ -1,5 +1,9 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+
+
 export const SCAN_FILE_NAME = "scan-1.json";
 
 function creaData(year, month, day, hour = 0, minute = 0, second = 0) {
@@ -121,11 +125,11 @@ async function analisiHash(file) {
   }
 }
 export async function analisi(scanFilePath, files) {
-    files.forEach(async file => {
-      await analisiHash(file);
+  await Promise.all(files.map(async file => {
+      //await analisiHash(file);
       await analisiDate(file);
       await analisiAlbum(file);
-    });
+    }));
     await fs.writeFile(scanFilePath, JSON.stringify(files, null, 2));
     console.log(`Analisi saved for ${scanFilePath}.`);
 }
