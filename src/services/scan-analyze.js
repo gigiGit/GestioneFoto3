@@ -99,10 +99,20 @@ async function analisiAlbum(file) {
     file.dt_valida = null;
   }
 }
+export function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("error", reject);
+    stream.on("data", chunk => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
 async function analisiHash(file) {
   if (file.hash === null || file.hash === undefined) {
     try {
-      const hash = await computeHash(file.fullname);
+      const hash = await hashFile(file.fullname);
       file.hash = hash;
     } catch (error) {
       console.error(`Error generating hash for ${file.fullname}:`, error);
