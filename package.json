@@ -6,7 +6,7 @@
   "type": "module",
   "main": "desktop/main.js",
   "scripts": {
-    "start": "node src/server.js",
+    "server": "node src/server.js",
     "test": "node --test",
     "web": "node src/web-server.cjs",
     "scan-cli": "node src/scan-cli.cjs --verbose --batch-size=100 --min-size=4096 --name=giuliano --source-dir=D:\\ --dest-dir=F:\\ArchivioFoto"
@@ -14,6 +14,7 @@
   "dependencies": {
     "bmp-js": "^0.1.0",
     "exifr": "^7.1.3",
+    "express": "^5.3.0",
     "sharp": "^0.35.5",
     "sqlite3": "^6.0.1"
   },

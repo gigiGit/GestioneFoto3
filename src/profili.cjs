@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-const path = require("node:path");
-const fs = require("node:fs");
-const fsp = require("node:fs/promises");
+import path from "node:path";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 
 function getProfilesDirectory() {
   return process.env.GESTIONEFOTO_PROFILES_DIR

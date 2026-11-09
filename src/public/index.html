@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Foto</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .contenitore {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sezione-sinistra,
+        .sezione-destra {
+            padding: 30px;
+        }
+
+        .sezione-sinistra {
+            background-color: #e8f0fe;
+            border-right: 2px solid #ccc;
+           
+        }
+
+        .sezione-destra {
+            background-color: #f5f5f5;
+        }
+
+        h2 {
+            color: #333;
+        }
+.job-button{
+    border: 1px solid red;
+    border-radius: 12px;
+    padding: 4px;
+    margin: 4px;
+}
+        @media (max-width: 768px) {
+            .contenitore {
+                flex-direction: column;
+            }
+
+            .sezione-sinistra,
+            .sezione-destra {
+                width: 100%;
+                min-height: 50vh;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="layout">
+        <div class="contenitore">
+            <section class="sezione-sinistra">
+                <select id="saved-profiles">
+                    <option value="">Seleziona un profilo</option>
+                </select><br>
+                <div><button id="job-scan" class="job-button">...</button>1) Scan</div>
+                <div id="scan-progress-box" hidden>
+                    <progress id="scan-progress" max="1"></progress>
+                    <button id="scan-stop" type="button" class="job-button" hidden>Stop</button>
+                    <div id="scan-progress-text"></div>
+                </div>
+                <div><button id="job-exif" class="job-button">...</button>2) Exif</div>
+                <div><button id="job-analisi" class="job-button">...</button>3) Analisi</div>
+                <div><button id="job-purge" class="job-button">...</button>4) Purge</div>
+                <div><button id="job-thumbnail" class="job-button">...</button>5) thumbnail</div>
+                <div><button id="job-copia" class="job-button">...</button>6) Copia</div>
+                <div>Filtri</div>
+                <div><button id="preview" class="job-button" onclick="preview()">...</button>Preview</div>
+            </section>
+
+            <section class="sezione-destra">
+                <div id="preview-container" class="panel preview-panel">
+                    <!-- 1) Filtri -->
+                    <form id="query-form">
+                        <table style="width:100%;">
+                            <tr>
+                                <td>Nome file</td>
+                                <td><input id="filter-name" name="name" type="text" placeholder="contiene..."></td>
+                                <td>Estensione</td>
+                                <td><input id="filter-ext" name="ext" type="text" placeholder=".jpg"></td>
+                            </tr>
+                            <tr>
+                                <td>Data da</td>
+                                <td><input id="filter-date-from" name="dateFrom" type="date"></td>
+                                <td>Data a</td>
+                                <td><input id="filter-date-to" name="dateTo" type="date"></td>
+                            </tr>
+                            <tr>
+                                <td>Dimensione min (byte)</td>
+                                <td><input id="filter-min-size" name="minSize" type="number" min="0"></td>
+                                <td>Album</td>
+                                <td><input id="filter-album" name="album" type="text"></td>
+                            </tr>
+                            <tr>
+                                <td>Validità</td>
+                                <td>
+                                    <select id="filter-valido" name="valido">
+                                        <option value="">Tutti</option>
+                                        <option value="1">Validi</option>
+                                        <option value="0">Non validi</option>
+                                    </select>
+                                </td>
+                                <td>Ordina per</td>
+                                <td>
+                                    <select id="filter-order" name="orderBy">
+                                        <option value="dt_valida">Data</option>
+                                        <option value="name">Nome</option>
+                                        <option value="size">Dimensione</option>
+                                    </select>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <!-- 2) Esecuzione query -->
+                        <div class="query-actions">
+                            <button id="query-run" type="submit" class="job-button">Esegui</button>
+                            <button id="query-reset" type="reset" class="job-button">Reset</button>
+                            <span id="query-status"></span>
+                        </div>
+                    </form>
+
+                    <!-- 3) Navigazione -->
+                    <div id="record-nav" class="record-nav">
+                        <button id="nav-first" type="button" class="job-button" title="Primo">|&lt;</button>
+                        <button id="nav-prev" type="button" class="job-button" title="Precedente">&lt;</button>
+                        <input id="nav-index" type="number" min="1" value="0" style="width:6em;">
+                        <span>di <span id="nav-total">0</span></span>
+                        <button id="nav-next" type="button" class="job-button" title="Successivo">&gt;</button>
+                        <button id="nav-last" type="button" class="job-button" title="Ultimo">&gt;|</button>
+                    </div>
+
+                    <!-- 4) Dati del record -->
+                    <div id="record-view" class="record-view">
+                        <img id="record-thumbnail" alt="thumbnail" style="max-width:320px; max-height:320px;">
+                        <table id="record-data" style="width:100%;">
+                            <tr><td>Nome</td><td data-field="name"></td></tr>
+                            <tr><td>Percorso</td><td data-field="fullname"></td></tr>
+                            <tr><td>Estensione</td><td data-field="ext"></td></tr>
+                            <tr><td>Dimensione</td><td data-field="size"></td></tr>
+                            <tr><td>Data valida</td><td data-field="dt_valida"></td></tr>
+                            <tr><td>Creato il</td><td data-field="createdAt"></td></tr>
+                            <tr><td>EXIF CreateDate</td><td data-field="exifCreateDate"></td></tr>
+                            <tr><td>EXIF DateTimeOriginal</td><td data-field="exifDateTimeOriginal"></td></tr>
+                            <tr><td>EXIF GPSDateStamp</td><td data-field="exifGPSDateStamp"></td></tr>
+                            <tr><td>EXIF ModifyDate</td><td data-field="exifModifyDate"></td></tr>
+                            <tr><td>Album</td><td data-field="albums"></td></tr>
+                            <tr><td>Valido</td><td data-field="valido"></td></tr>
+                            <tr><td>Hash</td><td data-field="hash"></td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div id="profile-container" class="panel profile-panel">
+                <form id="profile-form" style="display:block">
+                    <table style="width:100%;">
+                        <tr style="width:100%;">
+                            <td>Nome</td>
+                            <td  style="width:80%;"><input id="profile-name" name="name" type="text" maxlength="64"
+                                    pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" required></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Cartella Sorgente</td>
+                            <td><input id="profile-source" name="sourceFolders" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-source">Scegli...</button></td>
+                        </tr>
+                        <tr>
+                            <td>Cartella Destinazione</td>
+                            <td><input id="profile-dest" name="destDir" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-dest">Scegli...</button></td>
+                        </tr>
+                        <tr>
+                            <td>Cartella Scan</td>
+                            <td><input id="profile-scan" name="scanDir" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-scan">Scegli...</button></td>
+                        </tr>
+                        <tr>
+                            <td>Database Archivio</td>
+                            <td><input id="profile-archive" name="archive" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-archive">Scegli...</button></td>
+                        </tr>
+                        <tr>
+                            <td>Cartella Backup</td>
+                            <td><input id="profile-backup" name="backupPath" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-backup">Scegli...</button></td>
+                        </tr>
+                        <tr>
+                            <td>Cartella Album</td>
+                            <td><input id="profile-album" name="albumPath" type="text" required></td>
+                            <td><button class="secondary-button" type="button"
+                                    data-directory-target="profile-album">Scegli...</button></td>
+                        </tr>
+
+                        <tr>
+                            <td>File per scanfile</td>
+                            <td><input id="profile-batch-size" name="batchSize" type="number" min="1" max="10000"
+                                    required></td>
+                        </tr>
+                        <tr>
+                            <td>Dimensione minima (byte)</td>
+                            <td><input id="profile-min-size" name="minSize" type="number" min="0" required></td>
+                        </tr>
+                        <tr>
+                            <td>Estensioni immagini</td>
+                            <td><input id="profile-extensions" name="extensions" type="text" required></td>
+                        </tr>
+
+                        <tr>
+                            <td>Output dettagliato (verbose)</td>
+                            <td><input id="profile-verbose" name="verbose" type="checkbox"></td>
+
+                        </tr>
+
+
+
+
+                    </table>
+                    <div>
+                        <button id="profile-save" type="submit" class="job-button">Salva profilo</button>
+                        <span id="profile-status"></span>
+                    </div>
+                </form>
+                </div>
+            </section>
+
+        </div>
+        <div class="log" id="app-status">
+
+        </div>
+    </main>
+</body>
+
+</html>
