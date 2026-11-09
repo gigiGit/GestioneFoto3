@@ -5,7 +5,7 @@ import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-export const SCAN_FILE_NAME = "scan-1.json";
+export const SCAN_FILE_NAME = "scan.json";
 const EXIF_IMAGE_EXTENSIONS = Object.freeze([
   ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif"
 ]);
@@ -46,10 +46,20 @@ export async function scan({ sourceDir, scanDir } = {}) {
   if (!isOutside) {
     throw new Error("scanDir non può trovarsi dentro sourceDir");
   }
-
+  const scanFile = path.join(outputPath, SCAN_FILE_NAME);
+  let existingScan = {};
+  try {
+    const data = await fs.readFile(scanFile, "utf-8");
+    existingScan = JSON.parse(data);
+  } catch (error) {
+    // Ignore if the file doesn't exist or is invalid
+  }
+  await fs.mkdir(outputPath, { recursive: true });
+  
   const filePaths = [];
-  const files = [];
-
+  const files = existingScan.files ?? [];
+  let modified = false;
+  console.log(`Starting scan in source directory: ${files.length} existing files`);
   async function visitDirectory(directory) {
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
@@ -58,13 +68,20 @@ export async function scan({ sourceDir, scanDir } = {}) {
         var cnt=filePaths.length;
         console.log(`Visiting directory: ${filePath}`);
         await visitDirectory(filePath);
-        console.log(`Number of files visited in this directory: ${filePaths.length-cnt}`);
+        console.log(`Number of files visited in this directory: ${filePaths.length-cnt} Modified: ${modified} `);
+        if(modified) {
+          await fs.writeFile(scanFile, JSON.stringify({ exif: false,count: files.length,  files }, null, 2));
+          modified = false;
+        }
+
       } else if (entry.isFile()) {
         if (!entry.isFile() || !acceptedExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+        modified=true;
         filePaths.push(filePath);
         const stats = await fs.stat(filePath);
         const name = path.basename(filePath);
-      files.push({
+        if (files.find(f => f.fullname === filePath)) continue;
+        files.push({
         fullname: filePath,
         ext: path.extname(name),
         name,
@@ -76,15 +93,9 @@ export async function scan({ sourceDir, scanDir } = {}) {
       }
     }
   }
-
-  const scanFile = path.join(outputPath, SCAN_FILE_NAME);
-  const count = files.length;
   await visitDirectory(sourcePath);
-  await fs.mkdir(outputPath, { recursive: true });
-  const tempFile = scanFile + ".tmp";
-  await fs.writeFile(tempFile, JSON.stringify({ exif: false,  files }, null, 2));
-  await fs.rename(tempFile, scanFile);
-  console.log("Scan results:", files);
+  await fs.writeFile(scanFile, JSON.stringify({ exif: false,  files }, null, 2));
+  console.log("Scan results:", files.length);
   return {scanFile,files};
 }
 
@@ -106,7 +117,7 @@ async function main() {
   }
 
   
-  const files= await scan({
+  const {scanFile, files} = await scan({
     sourceDir: values["source-dir"],
     scanDir: values["scan-dir"]
   });

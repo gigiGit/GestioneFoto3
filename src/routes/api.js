@@ -101,12 +101,23 @@ router.post("/profiles", async (req, res) => {
 });
 
 // ---- Job: scan ----
-import { scan } from '../services/scanner.js';
+import { scan ,SCAN_FILE_NAME} from '../services/scanner.js';
 import { analisi } from '../services/scan-analyze.js';
 
 var listFiles = [];
 router.post("/jobs/scan", (req, res) => {
     console.log("Starting scan with sourceDir:", req.body);
+      const outputPath = path.resolve(req.body.scanDir);
+      const scanFile = path.join(outputPath, SCAN_FILE_NAME);
+      let existingScan = {};
+      try {
+        const data = fs.readFileSync(scanFile, "utf-8");
+        existingScan = JSON.parse(data);
+        listFiles = existingScan.files;
+      } catch (error) {
+        // Ignore if the file doesn't exist or is invalid
+      }      
+    
     scan({ sourceDir: req.body.sourceDir, scanDir: req.body.scanDir })
         .then(({scanFile, files}) => {
             console.log("Scan completed:", files.length);
