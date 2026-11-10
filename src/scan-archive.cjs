@@ -86,6 +86,56 @@ function mapArchivedRecord(record) {
   return { ...record, albums: deserializeAlbums(record.albums) };
 }
 
+async function readArchiveFiles(archivePath, filters = {}) {
+  const db = await openReadOnlyDatabase(path.resolve(archivePath));
+  try {
+    const conditions = [];
+    const values = [];
+    const text = value => typeof value === "string" ? value.trim() : "";
+    if (text(filters.name)) {
+      conditions.push("instr(lower(COALESCE(name, '')), lower(?)) > 0");
+      values.push(text(filters.name));
+    }
+    if (text(filters.ext)) {
+      const extension = text(filters.ext);
+      conditions.push("lower(ext) = lower(?)");
+      values.push(extension.startsWith(".") ? extension : `.${extension}`);
+    }
+    if (text(filters.album)) {
+      conditions.push("EXISTS (SELECT 1 FROM json_each(COALESCE(NULLIF(albums, ''), '[]')) WHERE lower(value) = lower(?))");
+      values.push(text(filters.album));
+    }
+    if (text(filters.dateFrom)) {
+      conditions.push("date(dt_valida) >= date(?)");
+      values.push(text(filters.dateFrom));
+    }
+    if (text(filters.dateTo)) {
+      conditions.push("date(dt_valida) <= date(?)");
+      values.push(text(filters.dateTo));
+    }
+    if (filters.minSize !== undefined && filters.minSize !== null && filters.minSize !== "" &&
+        Number.isInteger(Number(filters.minSize)) && Number(filters.minSize) >= 0) {
+      conditions.push("size >= ?");
+      values.push(Number(filters.minSize));
+    }
+    if ([0, 1, "0", "1"].includes(filters.valido)) {
+      conditions.push("valido = ?");
+      values.push(Number(filters.valido));
+    }
+    const orderBy = new Map([
+      ["dt_valida", "dt_valida DESC, name COLLATE NOCASE"],
+      ["name", "name COLLATE NOCASE"],
+      ["size", "size DESC, name COLLATE NOCASE"]
+    ]).get(filters.orderBy);
+    const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+    const order = orderBy ? ` ORDER BY ${orderBy}` : "";
+    const records = await all(db, `SELECT * FROM raw_files${where}${order}`, values);
+    return records.map(mapArchivedRecord);
+  } finally {
+    await closeDatabase(db);
+  }
+}
+
 async function listArchivedFiles(archivePath, { search = "", extension = "", dateFrom = "", dateTo = "", limit = 36, offset = 0 } = {}) {
   const db = await openReadOnlyDatabase(path.resolve(archivePath));
   try {
@@ -279,6 +329,7 @@ async function archiveScanFiles(scanDir, { archivePath = path.join(scanDir, "arc
 module.exports = {
   archiveScanFiles,
   initDB,
+  readArchiveFiles,
   listArchivedFiles,
   updateArchivedFile
 };

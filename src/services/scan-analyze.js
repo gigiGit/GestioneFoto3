@@ -2,9 +2,22 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import sqlite3 from "sqlite3"
 
+export function openDatabase(databasePath) {
+  console.log(`Opening database at: ${databasePath}`)
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(databasePath, error => {
+      if (error) {
+        reject(new Error(`Unable to open archive database ${databasePath}: ${error.message}`, { cause: error }));
+        return;
+      }
+      resolve(db);
+    });
+  });
+}
 
-export const SCAN_FILE_NAME = "scan-1.json";
+export const SCAN_FILE_NAME = "scan.json";
 
 function creaData(year, month, day, hour = 0, minute = 0, second = 0) {
   if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31 ||

@@ -118,7 +118,7 @@ router.post("/jobs/scan", (req, res) => {
         // Ignore if the file doesn't exist or is invalid
       }      
     
-    scan({ sourceDir: req.body.sourceDir, scanDir: req.body.scanDir })
+    scan({ sourceDir: req.body.sourceDir, scanDir: req.body.scanDir, archive: req.body.archive })
         .then(({scanFile, files}) => {
             console.log("Scan completed:", files.length);
             analisi(scanFile, files);

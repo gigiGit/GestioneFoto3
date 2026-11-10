@@ -142,7 +142,7 @@ async function startScan(type = "scan") {
         const response = await fetch(`/api/jobs/${type}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ scanDir: profile.scanDir, sourceDir: profile.sourceFolders })
+            body: JSON.stringify({ scanDir: profile.scanDir, sourceDir: profile.sourceFolders , archive: profile.archive })
         });
         const data = await response.json();
         console.log(data);
