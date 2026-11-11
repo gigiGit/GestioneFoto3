@@ -4,49 +4,31 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { openDatabase} from "./scan-analyze.js"
-import { initDB, readArchiveFiles } from "../scan-archive.cjs";
+import { readArchiveFiles, writeArchiveFiles } from "./scan-archive.cjs";
 export const SCAN_FILE_NAME = "scan.json";
 const EXIF_IMAGE_EXTENSIONS = Object.freeze([
-  ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif"
+  ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif",
+  ".3gp",
+  ".JPG",
+  ".MOV",
+  ".avi",
+  ".bmp",
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".m4v",
+  ".mov",
+  ".mp4",
+  ".mpg",
+  ".nef",
+  ".pdf",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".wmv"
 ]);
 
 const acceptedExtensions = new Set(EXIF_IMAGE_EXTENSIONS.map(extension => extension.toLowerCase()));
-
-function run(db, sql, values = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, values, function (error) {
-      if (error) reject(error);
-      else resolve(this.changes);
-    });
-  });
-}
-
-async function upsertFiles(db, files) {
-  const columns = [
-    "hash", "fullname", "name", "ext", "dt_valida", "size", "createdAt",
-    "exifCreateDate", "exifDateTimeOriginal", "exifGPSDateStamp", "exifModifyDate",
-    "thumbnail", "albums", "valido"
-  ];
-  const assignments = columns.map(column => `${column} = COALESCE(?, ${column})`).join(", ");
-  const placeholders = columns.map(() => "?").join(", ");
-  await run(db, "BEGIN IMMEDIATE");
-  try {
-    for (const file of files) {
-      const values = columns.map(column => column === "albums" && Array.isArray(file.albums)
-        ? JSON.stringify(file.albums)
-        : file[column] ?? null);
-      const changes = await run(db, `UPDATE raw_files SET ${assignments} WHERE fullname = ?`, [...values, file.fullname]);
-      if (changes === 0) {
-        await run(db, `INSERT INTO raw_files (${columns.join(", ")}) VALUES (${placeholders})`, values);
-      }
-    }
-    await run(db, "COMMIT");
-  } catch (error) {
-    await run(db, "ROLLBACK");
-    throw error;
-  }
-}
 
 export function hashFile(filePath) {
   return new Promise((resolve, reject) => {
@@ -60,83 +42,77 @@ export function hashFile(filePath) {
 
 /**
  * Carica i record dall'archivio e scansiona ricorsivamente sourceDir.
- * Calcola l'hash dei nuovi file e salva i record nel database.
+ * Calcola l'hash dei nuovi file e persiste i risultati solo dopo la scansione.
  * @returns {Promise<{ scanFile: string, files: object[] }>}
  */
-export async function scan({ sourceDir, scanDir,archive } = {}) {
-  if (!sourceDir || !scanDir) {
-    throw new TypeError("sourceDir e scanDir sono obbligatori");
+export async function scan({ sourceDir, archive, persist = true } = {}) {
+  console.log("SourceDir:", sourceDir, "archive:", archive);
+
+  if (!sourceDir || !archive) {
+    throw new TypeError("sourceDir e archive sono obbligatori");
   }
   const sourcePath = path.resolve(sourceDir);
-  const outputPath = path.resolve(scanDir);
-  
+
   const sourceStats = await fs.stat(sourcePath);
   if (!sourceStats.isDirectory()) {
     throw new TypeError(`sourceDir non è una cartella: ${sourcePath}`);
   }
-  // Evita che il file di output finisca dentro la scansione stessa
-  const relativeOutput = path.relative(sourcePath, outputPath);
-  const isOutside = relativeOutput === ".." || relativeOutput.startsWith(`..${path.sep}`) || path.isAbsolute(relativeOutput);
-  if (!isOutside) {
-    throw new Error("scanDir non può trovarsi dentro sourceDir");
-  }
-  const scanFile = path.join(outputPath, SCAN_FILE_NAME);
-  await fs.mkdir(outputPath, { recursive: true });
-  const db = await openDatabase(archive);
-  
+
   const filePaths = [];
   const files = [];
+  var pendingFiles=[];
   let modified = false;
-  async function visitDirectory(directory) {
+  try {
+    await fs.access(archive);
+    files.push(...await readArchiveFiles(archive));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  async function visitDirectory(directory, level = "  ") {
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const filePath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        var cnt=filePaths.length;
-        console.log(`Visiting directory: ${filePath}`);
-        await visitDirectory(filePath);
-        console.log(`Number of files visited in this directory: ${filePaths.length-cnt} Modified: ${modified} `);
-        if(modified) {
-        //  await fs.writeFile(scanFile, JSON.stringify({ exif: false,count: files.length,  files }, null, 2));
-          await upsertFiles(db, files);
-          modified = false;
+        var cnt = filePaths.length;
+        process.stdout.write(`${level}Visiting directory: ${filePath}                                                                                   \r`);
+        await visitDirectory(filePath, level + "  ");
+        process.stdout.write(`${level}Number of files visited in this directory: ${filePaths.length - cnt} Modified: ${modified}                          \r`);
+        if (persist && modified && pendingFiles.length > 0) {
+          await writeArchiveFiles(archive, pendingFiles);
+          console.log(`Wrote ${pendingFiles.length} new files to archive`);
         }
-
+        pendingFiles=[];
+        modified = false;
       } else if (entry.isFile()) {
+        if (files.find(f => f.fullname === filePath)) continue;
+        // Skip files with extensions not in the accepted list
         if (!entry.isFile() || !acceptedExtensions.has(path.extname(entry.name).toLowerCase())) continue;
-        modified=true;
+        
         filePaths.push(filePath);
         const stats = await fs.stat(filePath);
         const name = path.basename(filePath);
         if (files.find(f => f.fullname === filePath)) continue;
-        files.push({
-        fullname: filePath,
-        ext: path.extname(name),
-        name,
-        size: stats.size,
-        createdAt: stats.ctime.toISOString(),
-        hash:await hashFile(filePath)
-      });
-
+        const file = {
+          fullname: filePath,
+          ext: path.extname(name),
+          name,
+          size: stats.size,
+          createdAt: stats.ctime.toISOString(),
+          hash: await hashFile(filePath)
+        };
+        if(files.find(f => f.hash === file.hash)) continue;
+        modified = true;
+        pendingFiles.push(file);
+        files.push(file);
       }
     }
   }
-  try {
-    await initDB(db);
-    for (const record of await readArchiveFiles(archive)) {
-      files.push(record);
-    }
-    console.log(`Starting scan in source directory: ${files.length} existing files`);
-    await visitDirectory(sourcePath);
-    //await fs.writeFile(scanFile, JSON.stringify({ exif: false,  files }, null, 2));
-    await upsertFiles(db, files);
-    console.log("Scan results:", files.length);
-    return {scanFile,files};
-  } finally {
-    await new Promise((resolve, reject) => {
-      db.close(error => error ? reject(error) : resolve());
-    });
-  }
+  console.log(`Starting scan in source directory: ${files.length} existing files`);
+  await visitDirectory(sourcePath);
+  if (persist && pendingFiles.length > 0) await writeArchiveFiles(archive, pendingFiles);
+  console.log("Scan Completato. Risultati:", files.length);
+  return files;
 }
 
 // ---- Modalità riga di comando ----
@@ -156,8 +132,8 @@ async function main() {
     return;
   }
 
-  
-  const {scanFile, files} = await scan({
+
+  const files = await scan({
     sourceDir: values["source-dir"],
     scanDir: values["scan-dir"]
   });

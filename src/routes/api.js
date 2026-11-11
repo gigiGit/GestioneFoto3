@@ -3,6 +3,8 @@ import express from 'express';
 const router = express.Router();
 import fs from 'fs';
 import path from 'path';
+import { readExifFromArchive } from '../services/scan-exif.js';
+import { readThumbnailFromArchive } from '../services/scan-exif.js';
 const profili = {};
 // API di verifica server
 router.get('/health', (req, res) => {
@@ -28,6 +30,58 @@ import {
     loadProfile,
     saveProfile
 } from '../services/profileManager.js';
+import { readArchiveFiles, writeArchiveFiles, selectValidDuplicate, updateArchiveRecord } from '../services/scan-archive.cjs';
+
+const recordsByProfile = new Map();
+const archiveByProfile = new Map();
+const pendingScans = new Map();
+
+async function loadProfileArchive(profileName, archivePath) {
+    const resolvedPath = path.resolve(archivePath);
+    archiveByProfile.set(profileName, resolvedPath);
+    if (!fs.existsSync(resolvedPath)) {
+        recordsByProfile.set(profileName, []);
+        return [];
+    }
+    const records = await readArchiveFiles(resolvedPath, {}, "*");
+    recordsByProfile.set(profileName, records);
+    return records;
+}
+
+export async function initializeArchiveCache() {
+    const profileFiles = await listProfiles();
+    for (const profileFile of profileFiles) {
+        if (!profileFile.isFile() || !profileFile.name.toLowerCase().endsWith('.json')) continue;
+        let profile;
+        try {
+            profile = JSON.parse(fs.readFileSync(path.join(profileFile.parentPath, profileFile.name), 'utf8'));
+        } catch (error) {
+            console.error(`Profilo non valido ${profileFile.name}:`, error);
+            continue;
+        }
+        if (!profile.name) continue;
+        const normalizedProfile = { ...createDefaultProfile(), ...profile };
+        profili[profile.name] = normalizedProfile;
+        if (typeof normalizedProfile.archive !== 'string' || !normalizedProfile.archive.trim()) continue;
+        try {
+            const records = await loadProfileArchive(profile.name, normalizedProfile.archive);
+            console.log(`Precaricati ${records.length} record per il profilo ${profile.name}`);
+        } catch (error) {
+            throw new Error(`Impossibile precaricare l'archivio del profilo ${profile.name}`, { cause: error });
+        }
+    }
+}
+
+function getCachedRecords(profileName) {
+    if (profileName) return recordsByProfile.get(profileName) ?? [];
+    const uniqueRecords = new Map();
+    for (const records of recordsByProfile.values()) {
+        for (const record of records) uniqueRecords.set(record.fullname, record);
+    }
+    return [...uniqueRecords.values()];
+}
+
+
 router.get("/profiles", async (req, res) => {
     console.log("/profiles")
     const defaultProf = createDefaultProfile();
@@ -93,6 +147,14 @@ router.post("/profiles", async (req, res) => {
         const existing = (await loadProfile(profile.name)) ?? {};
         const saved = await saveProfile({ ...existing, ...profile });
         profili[saved.name] = { ...createDefaultProfile(), ...saved };
+        if (saved.archive) {
+            try {
+                await loadProfileArchive(saved.name, saved.archive);
+            } catch (error) {
+                console.error(`Errore caricamento archivio ${saved.name}:`, error);
+                recordsByProfile.set(saved.name, []);
+            }
+        }
         res.json(saved);
     } catch (err) {
         console.error("/profiles save:", err);
@@ -101,41 +163,99 @@ router.post("/profiles", async (req, res) => {
 });
 
 // ---- Job: scan ----
-import { scan ,SCAN_FILE_NAME} from '../services/scanner.js';
+import { scan } from '../services/scanner.js';
 import { analisi } from '../services/scan-analyze.js';
 
-var listFiles = [];
-router.post("/jobs/scan", (req, res) => {
-    console.log("Starting scan with sourceDir:", req.body);
-      const outputPath = path.resolve(req.body.scanDir);
-      const scanFile = path.join(outputPath, SCAN_FILE_NAME);
-      let existingScan = {};
-      try {
-        const data = fs.readFileSync(scanFile, "utf-8");
-        existingScan = JSON.parse(data);
-        listFiles = existingScan.files;
-      } catch (error) {
-        // Ignore if the file doesn't exist or is invalid
-      }      
-    
-    scan({ sourceDir: req.body.sourceDir, scanDir: req.body.scanDir, archive: req.body.archive })
-        .then(({scanFile, files}) => {
-            console.log("Scan completed:", files.length);
-            analisi(scanFile, files);
-            listFiles = files;
-        }).catch(error => res.status(500).json({ error: error.message })).finally(() => {
-            console.log("List of files:", listFiles.length);
-        });
-});
+router.post("/jobs/scan", async (req, res) => {
+    const { sourceDir,  archive } = req.body ?? {};
+    console.log("SourceDir:", sourceDir, "archive:", archive);
+    const scanKey = path.resolve(archive);
+    if (pendingScans.has(scanKey)) {
+        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
+    }    
+    const scanPromise = scan({sourceDir, archive},true)
+    .then((files)=>{ 
+        pendingScans.delete(scanKey); 
+        res.json({ success: true });
+        console.log(`Scan completed for archive: ${archive}`,files.length);
+    })
+    .catch(err => {
+        pendingScans.delete(scanKey);
+        console.error("Errore durante la scansione:", err);
+        res.status(500).json({ error: "Errore durante la scansione" });
+    });
+    pendingScans.set(scanKey, scanPromise);
 
+});
+router.post("/jobs/exif", async (req, res) => {
+    const { sourceDir,  archive } = req.body ?? {};
+    console.log("SourceDir:", sourceDir, "archive:", archive);
+    const scanKey = path.resolve(archive);
+    if (pendingScans.has(scanKey)) {
+        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
+    }    
+    const scanPromise = readExifFromArchive( archive)
+    .then((files)=>{ 
+        pendingScans.delete(scanKey); 
+        res.json({ success: true });
+        console.log(`Scan completed for archive: ${archive}`,files.length);
+    })
+    .catch(err => {
+        pendingScans.delete(scanKey);
+        console.error("Errore durante la scansione:", err);
+        res.status(500).json({ error: "Errore durante la scansione" });
+    });
+    pendingScans.set(scanKey, scanPromise);
+
+});
+router.post("/jobs/analisi", async (req, res) => {
+    const { sourceDir,  archive } = req.body ?? {};
+    console.log("SourceDir:", sourceDir, "archive:", archive);
+    const scanKey = path.resolve(archive);
+    if (pendingScans.has(scanKey)) {
+        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
+    }    
+    const scanPromise = analisi( archive)
+    .then((files)=>{ 
+        pendingScans.delete(scanKey); 
+        res.json({ success: true });
+        console.log(`Scan completed for archive: ${archive}`,files.length);
+    })
+    .catch(err => {
+        pendingScans.delete(scanKey);
+        console.error("Errore durante la scansione:", err);
+        res.status(500).json({ error: "Errore durante la scansione" });
+    });
+    pendingScans.set(scanKey, scanPromise);
+
+});
+router.post("/jobs/thumbnail", async (req, res) => {
+    const { sourceDir,  archive } = req.body ?? {};
+    console.log("SourceDir:", sourceDir, "archive:", archive);
+    const scanKey = path.resolve(archive);
+    if (pendingScans.has(scanKey)) {
+        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
+    }    
+    const scanPromise = readThumbnailFromArchive( archive)
+    .then((files)=>{ 
+        pendingScans.delete(scanKey); 
+        res.json({ success: true });
+        console.log(`Scan completed for archive: ${archive}`,files.length);
+    })
+    .catch(err => {
+        pendingScans.delete(scanKey);
+        console.error("Errore durante la scansione:", err);
+        res.status(500).json({ error: "Errore durante la scansione" });
+    });
+    pendingScans.set(scanKey, scanPromise);
+
+});
 // ---- Archivio: ricerca record ----
-// Da implementare: restituisce un array di oggetti con almeno { fullname }
-async function searchArchive(filters) {
-    return [];
+async function searchArchive(filters, profileName) {
+    return filterArchiveRecords(getCachedRecords(profileName), filters);
 }
-// Da implementare: restituisce il record completo di raw_files o null
-async function getArchiveRecord(fullname) {
-    return null;
+async function getArchiveRecord(fullname, profileName) {
+    return getCachedRecords(profileName).find(file => file.fullname === fullname) ?? null;
 }
 
 const ORDER_BY_COLUMNS = new Set(["dt_valida", "name", "size"]);
@@ -143,10 +263,17 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseRecordFilters(query) {
     const filters = {};
-    const text = value => (typeof value === "string" ? value.trim() : "");
+    const text = value => {
+        if (typeof value === "string") return value.trim();
+        if (typeof value === "number" && Number.isFinite(value)) return String(value);
+        return "";
+    };
 
     if (text(query.name)) filters.name = text(query.name);
-    if (text(query.ext)) filters.ext = text(query.ext).toLowerCase();
+    if (text(query.ext)) {
+        const extension = text(query.ext).toLowerCase();
+        filters.ext = extension.startsWith(".") ? extension : `.${extension}`;
+    }
     if (text(query.album)) filters.album = text(query.album);
     if (DATE_PATTERN.test(text(query.dateFrom))) filters.dateFrom = text(query.dateFrom);
     if (DATE_PATTERN.test(text(query.dateTo))) filters.dateTo = text(query.dateTo);
@@ -155,23 +282,153 @@ function parseRecordFilters(query) {
     if (text(query.minSize) && Number.isInteger(minSize) && minSize >= 0) filters.minSize = minSize;
 
     if (text(query.valido) === "0" || text(query.valido) === "1") filters.valido = Number(query.valido);
+    if ([true, 1, "1", "true", "on"].includes(query.duplicates)) filters.duplicates = true;
 
     filters.orderBy = ORDER_BY_COLUMNS.has(text(query.orderBy)) ? text(query.orderBy) : "dt_valida";
     return filters;
 }
+
+function recordDate(value) {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? "" : value.toISOString().slice(0, 10);
+    }
+    if (typeof value !== "string") return "";
+    const text = value.trim();
+    const isoDate = /^(\d{4}-\d{2}-\d{2})/.exec(text);
+    if (isoDate) return isoDate[1];
+    const exifDate = /^(\d{4})[:/](\d{2})[:/](\d{2})/.exec(text);
+    if (exifDate) return `${exifDate[1]}-${exifDate[2]}-${exifDate[3]}`;
+    const parsedDate = new Date(text);
+    return Number.isNaN(parsedDate.getTime()) ? "" : parsedDate.toISOString().slice(0, 10);
+}
+
+function filterArchiveRecords(sourceFiles, filters) {
+    const name = filters.name?.toLowerCase();
+    const album = filters.album?.toLowerCase();
+    const duplicateHashes = new Set();
+    if (filters.duplicates) {
+        const hashCounts = new Map();
+        for (const file of sourceFiles) {
+            if (typeof file.hash === "string" && file.hash) {
+                hashCounts.set(file.hash, (hashCounts.get(file.hash) ?? 0) + 1);
+            }
+        }
+        for (const [hash, count] of hashCounts) {
+            if (count > 1) duplicateHashes.add(hash);
+        }
+    }
+    const records = sourceFiles.filter(file => {
+        if (filters.duplicates && (!file.hash || !duplicateHashes.has(file.hash))) return false;
+        if (name && !String(file.fullname ?? "").toLowerCase().includes(name)) return false;
+        if (filters.ext && String(file.ext ?? "").toLowerCase() !== filters.ext) return false;
+        if (album && !(Array.isArray(file.albums) && file.albums.some(value => String(value).toLowerCase() === album))) return false;
+        const date = recordDate(file.dt_valida);
+        if (filters.dateFrom && (!date || date < filters.dateFrom)) return false;
+        if (filters.dateTo && (!date || date > filters.dateTo)) return false;
+        if (filters.minSize !== undefined && Number(file.size ?? 0) < filters.minSize) return false;
+        if (filters.valido !== undefined && (file.valido === null || file.valido === undefined || Number(file.valido) !== filters.valido)) return false;
+        return true;
+    });
+    const compareName = (left, right) => String(left.name ?? "").localeCompare(String(right.name ?? ""), undefined, { sensitivity: "base" });
+    records.sort((left, right) => {
+        if (filters.orderBy === "name") return compareName(left, right);
+        if (filters.orderBy === "size") return Number(right.size ?? 0) - Number(left.size ?? 0) || compareName(left, right);
+        return recordDate(right.dt_valida).localeCompare(recordDate(left.dt_valida)) || compareName(left, right);
+    });
+    return records;
+}
+
 router.post("/preview/list", async (req, res) => {
     try {
-        console.log("Preview list requested",req.body);        
-        res.json(listFiles.map(file => ({ fullname: file.fullname })));
+        const filters = parseRecordFilters(req.body ?? {});
+        const profileName = typeof req.body?.profileName === "string" ? req.body.profileName : "";
+        const records = filterArchiveRecords(getCachedRecords(profileName), filters);
+        res.json(records.map(({ fullname }) => ({ fullname })));
     } catch (error) {
         console.error("/preview/list:", error);
         res.status(500).json({ error: "Errore durante la ricerca" });
     }
 });
 
+router.post("/records/duplicates/select", async (req, res) => {
+    const profileName = typeof req.body?.profileName === "string" ? req.body.profileName : "";
+    const fullname = typeof req.body?.fullname === "string" ? req.body.fullname : "";
+    if (!profileName || !fullname) {
+        return res.status(400).json({ error: "profileName e fullname sono obbligatori" });
+    }
+
+    //await waitForScans(profileName);
+    const archivePath = archiveByProfile.get(profileName);
+    if (!archivePath) return res.status(404).json({ error: "Archivio del profilo non disponibile" });
+    if (pendingScans.has(archivePath)) {
+        return res.status(409).json({ error: "È già in corso un aggiornamento dell'archivio" });
+    }
+
+    const records = getCachedRecords(profileName);
+    const selected = records.find(file => file.fullname === fullname);
+    if (!selected?.hash) return res.status(404).json({ error: "File o hash non disponibile" });
+    const duplicateCount = records.filter(file => file.hash === selected.hash).length;
+    if (duplicateCount < 2) return res.status(409).json({ error: "Il file non appartiene a un gruppo di duplicati" });
+
+    const updatePromise = selectValidDuplicate(archivePath, { fullname, hash: selected.hash });
+    pendingScans.set(archivePath, updatePromise);
+    try {
+        await updatePromise;
+        //await reloadArchiveProfiles(archivePath);
+        res.json({ success: true, fullname, duplicateCount });
+    } catch (error) {
+        console.error("Errore selezione duplicato:", error);
+        res.status(500).json({ error: error.message });
+    } finally {
+        if (pendingScans.get(archivePath) === updatePromise) pendingScans.delete(archivePath);
+    }
+});
+
+router.post("/records/update", async (req, res) => {
+    const profileName = typeof req.body?.profileName === "string" ? req.body.profileName : "";
+    const fullname = typeof req.body?.fullname === "string" ? req.body.fullname : "";
+    const dtValida = req.body?.dtValida;
+    const valido = req.body?.valido;
+    if (!profileName || !fullname || typeof valido !== "boolean") {
+        return res.status(400).json({ error: "profileName, fullname e valido sono obbligatori" });
+    }
+    if (dtValida !== null && (typeof dtValida !== "string" || Number.isNaN(Date.parse(dtValida)))) {
+        return res.status(400).json({ error: "Data valida non corretta" });
+    }
+
+    //await waitForScans(profileName);
+    const archivePath = archiveByProfile.get(profileName);
+    if (!archivePath) return res.status(404).json({ error: "Archivio del profilo non disponibile" });
+    if (pendingScans.has(archivePath)) {
+        return res.status(409).json({ error: "È già in corso un aggiornamento dell'archivio" });
+    }
+
+    const updatePromise = updateArchiveRecord(archivePath, {
+        fullname,
+        dtValida: dtValida ? new Date(dtValida).toISOString() : null,
+        valido
+    });
+    pendingScans.set(archivePath, updatePromise);
+    try {
+        const record = await updatePromise;
+        //await reloadArchiveProfiles(archivePath);
+        const duplicateCount = record.hash
+            ? getCachedRecords(profileName).filter(candidate => candidate.hash === record.hash).length
+            : 0;
+        res.json({ success: true, record: { ...record, duplicateCount } });
+    } catch (error) {
+        console.error("Errore aggiornamento record:", error);
+        res.status(500).json({ error: error.message });
+    } finally {
+        if (pendingScans.get(archivePath) === updatePromise) pendingScans.delete(archivePath);
+    }
+});
+
 router.get("/records", async (req, res) => {
     try {
-        const records = await searchArchive(parseRecordFilters(req.query));
+        const profileName = typeof req.query.profileName === "string" ? req.query.profileName : "";
+        //await waitForScans(profileName);
+        const records = await searchArchive(parseRecordFilters(req.query), profileName);
         res.json(records);
     } catch (error) {
         console.error("/records:", error);
@@ -181,15 +438,21 @@ router.get("/records", async (req, res) => {
 
 router.get("/records/detail", async (req, res) => {
     const fullname = typeof req.query.fullname === "string" ? req.query.fullname : "";
+    const profileName = typeof req.query.profileName === "string" ? req.query.profileName : "";
     if (!fullname) {
         return res.status(400).json({ error: "Parametro fullname obbligatorio" });
     }
     try {
-        const record = await getArchiveRecord(fullname);
+        //await waitForScans(profileName);
+        const record = await getArchiveRecord(fullname, profileName);
         if (!record) {
             return res.status(404).json({ error: "Record non trovato" });
         }
-        res.json(record);
+        console.log("Record trovato:", record);
+        const duplicateCount = record.hash
+            ? getCachedRecords(profileName).filter(candidate => candidate.hash === record.hash).length
+            : 0;
+        res.json({ ...record, duplicateCount });
     } catch (error) {
         console.error("/records/detail:", error);
         res.status(500).json({ error: "Errore durante la lettura del record" });

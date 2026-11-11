@@ -1,6 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs/promises");
-const scanTools = require("./scan-tools.cjs");
+const scanTools = require("../scan-tools.cjs");
 const sqlite3 = require("sqlite3");
 const IMAGE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif"
@@ -17,6 +17,42 @@ function run(db, sql, values = []) {
       else resolve(this.changes);
     });
   });
+}
+
+async function upsertFiles(db, files) {
+  const columns = [
+    "hash", "fullname", "name", "ext", "dt_valida", "size", "createdAt",
+    "exifCreateDate", "exifDateTimeOriginal", "exifGPSDateStamp", "exifModifyDate",
+    "thumbnail", "albums", "valido"
+  ];
+  const assignments = columns.map(column => `${column} = COALESCE(?, ${column})`).join(", ");
+  const placeholders = columns.map(() => "?").join(", ");
+  await run(db, "BEGIN IMMEDIATE");
+  try {
+    for (const file of files) {
+      const values = columns.map(column => column === "albums" && Array.isArray(file.albums)
+        ? JSON.stringify(file.albums)
+        : file[column] ?? null);
+      const changes = await run(db, `UPDATE raw_files SET ${assignments} WHERE fullname = ?`, [...values, file.fullname]);
+      if (changes === 0) {
+        await run(db, `INSERT INTO raw_files (${columns.join(", ")}) VALUES (${placeholders})`, values);
+      }
+    }
+    await run(db, "COMMIT");
+  } catch (error) {
+    await run(db, "ROLLBACK");
+    throw error;
+  }
+}
+
+async function writeArchiveFiles(databasePath, files) {
+  const db = await openDatabase(databasePath);
+  try {
+    await initDB(db);
+    await upsertFiles(db, files);
+  } finally {
+    await closeDatabase(db);
+  }
 }
 
 function openDatabase(databasePath) {
@@ -86,7 +122,7 @@ function mapArchivedRecord(record) {
   return { ...record, albums: deserializeAlbums(record.albums) };
 }
 
-async function readArchiveFiles(archivePath, filters = {}) {
+async function readArchiveFiles(archivePath, filters = {},sellist="*") {
   const db = await openReadOnlyDatabase(path.resolve(archivePath));
   try {
     const conditions = [];
@@ -129,7 +165,7 @@ async function readArchiveFiles(archivePath, filters = {}) {
     ]).get(filters.orderBy);
     const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
     const order = orderBy ? ` ORDER BY ${orderBy}` : "";
-    const records = await all(db, `SELECT * FROM raw_files${where}${order}`, values);
+    const records = await all(db, `SELECT ${sellist} FROM raw_files ${where} ${order}`, values);
     return records.map(mapArchivedRecord);
   } finally {
     await closeDatabase(db);
@@ -182,27 +218,126 @@ async function updateArchivedFile(archivePath, { recordId, dtValida, albums }) {
   await fs.access(databasePath);
   const db = await openExistingDatabase(databasePath);
   try {
-    const columns = await all(db, "PRAGMA table_info(raw_files)");
-    if (columns.length === 0) throw new Error("La tabella raw_files non esiste nell’archivio");
-    if (!columns.some(column => column.name === "albums")) {
-      await run(db, "ALTER TABLE raw_files ADD COLUMN albums TEXT");
+    await run(db, "BEGIN IMMEDIATE");
+    try {
+      const columns = await all(db, "PRAGMA table_info(raw_files)");
+      if (columns.length === 0) throw new Error("La tabella raw_files non esiste nell’archivio");
+      if (!columns.some(column => column.name === "albums")) {
+        await run(db, "ALTER TABLE raw_files ADD COLUMN albums TEXT");
+      }
+
+      const changes = await run(
+        db,
+        "UPDATE raw_files SET dt_valida = ?, albums = ? WHERE rowid = ?",
+        [dtValida || null, JSON.stringify(albums), recordId]
+      );
+      if (changes === 0) throw new Error("Il record selezionato non esiste più nell’archivio");
+
+      const record = await get(
+        db,
+        `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
+                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido
+         FROM raw_files WHERE rowid = ?`,
+        [recordId]
+      );
+      await run(db, "COMMIT");
+      return mapArchivedRecord(record);
+    } catch (error) {
+      await run(db, "ROLLBACK");
+      throw error;
     }
+  } finally {
+    await closeDatabase(db);
+  }
+}
 
-    const changes = await run(
-      db,
-      "UPDATE raw_files SET dt_valida = ?, albums = ? WHERE rowid = ?",
-      [dtValida || null, JSON.stringify(albums), recordId]
-    );
-    if (changes === 0) throw new Error("Il record selezionato non esiste più nell’archivio");
+async function updateArchiveRecord(archivePath, { fullname, dtValida, valido }) {
+  const databasePath = path.resolve(archivePath);
+  await fs.access(databasePath);
+  const db = await openExistingDatabase(databasePath);
+  try {
+    await run(db, "BEGIN IMMEDIATE");
+    try {
+      const columns = await all(db, "PRAGMA table_info(raw_files)");
+      if (columns.length === 0) throw new Error("La tabella raw_files non esiste nell’archivio");
+      if (!columns.some(column => column.name === "albums")) {
+        await run(db, "ALTER TABLE raw_files ADD COLUMN albums TEXT");
+      }
+      if (!columns.some(column => column.name === "valido")) {
+        await run(db, "ALTER TABLE raw_files ADD COLUMN valido INTEGER");
+      }
 
-    const record = await get(
-      db,
-      `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
-              exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido
-       FROM raw_files WHERE rowid = ?`,
-      [recordId]
-    );
-    return mapArchivedRecord(record);
+      const selected = await get(db, "SELECT fullname, hash FROM raw_files WHERE fullname = ?", [fullname]);
+      if (!selected) throw new Error("Il record selezionato non esiste più nell’archivio");
+
+      const dateValue = dtValida || null;
+      if (valido && selected.hash) {
+        const duplicates = await get(db, "SELECT COUNT(*) AS count FROM raw_files WHERE hash = ?", [selected.hash]);
+        if (duplicates.count > 1) {
+          await run(
+            db,
+            `UPDATE raw_files
+             SET dt_valida = CASE WHEN fullname = ? THEN ? ELSE dt_valida END,
+                 valido = CASE WHEN fullname = ? THEN 1 ELSE 0 END
+             WHERE hash = ?`,
+            [fullname, dateValue, fullname, selected.hash]
+          );
+        } else {
+          await run(db, "UPDATE raw_files SET dt_valida = ?, valido = 1 WHERE fullname = ?", [dateValue, fullname]);
+        }
+      } else {
+        await run(db, "UPDATE raw_files SET dt_valida = ?, valido = ? WHERE fullname = ?", [dateValue, valido ? 1 : 0, fullname]);
+      }
+
+      const record = await get(
+        db,
+        `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
+                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums, valido
+         FROM raw_files WHERE fullname = ?`,
+        [fullname]
+      );
+      await run(db, "COMMIT");
+      return mapArchivedRecord(record);
+    } catch (error) {
+      await run(db, "ROLLBACK");
+      throw error;
+    }
+  } finally {
+    await closeDatabase(db);
+  }
+}
+
+async function selectValidDuplicate(archivePath, { fullname, hash }) {
+  const databasePath = path.resolve(archivePath);
+  await fs.access(databasePath);
+  const db = await openExistingDatabase(databasePath);
+  try {
+    await run(db, "BEGIN IMMEDIATE");
+    try {
+      const duplicateCount = await get(
+        db,
+        "SELECT COUNT(*) AS count FROM raw_files WHERE hash = ?",
+        [hash]
+      );
+      if (duplicateCount.count < 2) throw new Error("Il file non appartiene a un gruppo di duplicati");
+
+      const selectedRecord = await get(
+        db,
+        "SELECT fullname FROM raw_files WHERE fullname = ? AND hash = ?",
+        [fullname, hash]
+      );
+      if (!selectedRecord) throw new Error("Il file selezionato non esiste più nell'archivio");
+
+      await run(
+        db,
+        "UPDATE raw_files SET valido = CASE WHEN fullname = ? THEN 1 ELSE 0 END WHERE hash = ?",
+        [fullname, hash]
+      );
+      await run(db, "COMMIT");
+    } catch (error) {
+      await run(db, "ROLLBACK");
+      throw error;
+    }
   } finally {
     await closeDatabase(db);
   }
@@ -329,9 +464,14 @@ async function archiveScanFiles(scanDir, { archivePath = path.join(scanDir, "arc
 module.exports = {
   archiveScanFiles,
   initDB,
+  openDatabase,
   readArchiveFiles,
+  writeArchiveFiles,
   listArchivedFiles,
-  updateArchivedFile
+  updateArchivedFile,
+  updateArchiveRecord,
+  selectValidDuplicate,
+  upsertFiles
 };
 
 if (require.main === module) {

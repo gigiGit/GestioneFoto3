@@ -2,22 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import sqlite3 from "sqlite3"
-
-export function openDatabase(databasePath) {
-  console.log(`Opening database at: ${databasePath}`)
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(databasePath, error => {
-      if (error) {
-        reject(new Error(`Unable to open archive database ${databasePath}: ${error.message}`, { cause: error }));
-        return;
-      }
-      resolve(db);
-    });
-  });
-}
-
-export const SCAN_FILE_NAME = "scan.json";
+import { readArchiveFiles, writeArchiveFiles } from "./scan-archive.cjs";
 
 function creaData(year, month, day, hour = 0, minute = 0, second = 0) {
   if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31 ||
@@ -80,21 +65,28 @@ function recuperaDataDaNome(file) {
   return null;
 }
 
-async function analisiDate(file) {
+async function analisiDate(file,force=true) {
 
-  if (file.dt_valida === null || file.dt_valida === undefined) {
+  if (force || file.dt_valida === null || file.dt_valida === undefined) {
     try {
       let bestTry = file.exifDateTimeOriginal ?? file.exifCreateDate ?? file.exifGPSDateStamp ?? file.exifModifyDate;
+      if(!(bestTry > new Date("1900-01-01") && bestTry < new Date("2030-01-01"))) {
+        bestTry = null;
+      }
       var dateFrom = "exif";
       if (bestTry === null || bestTry === undefined) {
         bestTry = recuperaDataDaNome(file);
-        var dateFrom = "Nome";
+        if(bestTry > new Date("1900-01-01") && bestTry < new Date("2030-01-01")) {
+          var dateFrom = "Nome";
+        }else{
+          bestTry = null;
+        }
       }
       if (bestTry === null) {
         bestTry = file.createdAt;
         var dateFrom = "fs";
       }
-      file.dt_valida = bestTry;
+      file.dt_valida =new Date(bestTry).toISOString();
       file.dateFrom = dateFrom;
     } catch (error) {
       console.error(`Error generating thumbnail for ${file.fullname}:`, error);
@@ -109,11 +101,10 @@ async function analisiAlbum(file) {
   try {
     const normalizedPath = path.normalize(file.fullname);
     const dirs = normalizedPath.split(path.sep);
-    file.albums.push(...dirs.slice(1, -1));
+    file.albums=dirs.slice(1, -1);
     file.valido=true;
   } catch (error) {
     console.error(`Error generating Albums for ${file.fullname}:`, error);
-    file.dt_valida = null;
   }
 }
 export function hashFile(filePath) {
@@ -126,24 +117,58 @@ export function hashFile(filePath) {
   });
 }
 
-async function analisiHash(file) {
-  if (file.hash === null || file.hash === undefined) {
+
+export async function analisi(archive) {
+  let count = 0;
+    let pendingFiles = [];
+    const files = [];
     try {
-      const hash = await hashFile(file.fullname);
-      file.hash = hash;
+      await fs.access(archive);
+      files.push(...await readArchiveFiles(archive));
     } catch (error) {
-      console.error(`Error generating hash for ${file.fullname}:`, error);
-      file.hash = null;
+      if (error.code !== "ENOENT") throw error;
     }
-  }
-}
-export async function analisi(scanFilePath, files) {
-  await Promise.all(files.map(async file => {
+  for(const file of files){
       //await analisiHash(file);
       await analisiDate(file);
       await analisiAlbum(file);
-    }));
-    await fs.writeFile(scanFilePath, JSON.stringify(files, null, 2));
-    console.log(`Analisi saved for ${scanFilePath}.`);
+      pendingFiles.push(file);
+      if(pendingFiles.length >= 100) {
+        await writeArchiveFiles(archive, pendingFiles);
+        pendingFiles = [];
+      }
+    }
+   if(pendingFiles.length > 0) {
+     await writeArchiveFiles(archive, pendingFiles);
+   }
+   return files;
 }
+export async function analisiFromArchive(archive,cb,message) {
+  let count = 0;
+    let pendingFiles = [];
+    const files = [];
+    try {
+      await fs.access(archive);
+      files.push(...await readArchiveFiles(archive));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  for(const file of files){
+      if(!cb(file)) continue;
+      count++;
+      pendingFiles.push(file);
+      if(count % 100 === 0) console.log(`Processed ${count} files for ${message} analysis, pending writes: ${pendingFiles.length}`);
+      if(pendingFiles.length >= 100) {
+        await writeArchiveFiles(archive, pendingFiles);
+        pendingFiles = [];
+      }
+    }
+   if(pendingFiles.length > 0) {
+     await writeArchiveFiles(archive, pendingFiles);
+   }
+   return files;
+}
+
+//await analisiFromArchive("scan\\archive.db", analisiDate,"analisiDate");
+//await analisiFromArchive("scan\\archive.db", analisiAlbum,"analisiAlbum");
 

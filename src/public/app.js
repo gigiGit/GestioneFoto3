@@ -113,8 +113,9 @@ profileSelector.addEventListener("change", () => {
     if (profileSelector.value) loadProfile(profileSelector.value);
 });
 jobScan.addEventListener("click", () => startScan("scan"));
-
-
+jobExif.addEventListener("click", () => startScan("exif"));
+jobAnalisi.addEventListener("click", () => startScan("analisi"));
+jobThumbnail.addEventListener("click", () => startScan("thumbnail"));
 
 
 
@@ -142,7 +143,7 @@ async function startScan(type = "scan") {
         const response = await fetch(`/api/jobs/${type}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ scanDir: profile.scanDir, sourceDir: profile.sourceFolders , archive: profile.archive })
+            body: JSON.stringify({ profileName: profile.name, scanDir: profile.scanDir, sourceDir: profile.sourceFolders , archive: profile.archive })
         });
         const data = await response.json();
         console.log(data);
@@ -176,17 +177,8 @@ function ShowPanel(id) {
 }
 
 function preview() {
-    const filters = getFilters();
     ShowPanel("preview-container");
-    requestJson("/api/preview/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(filters)
-    }).then(data => {
-        console.log(data);
-    }).catch(error => {
-        console.error(error);
-    });
+    runQuery(getFilters());
 }
 
 // ---- Preview: stato ----
@@ -201,11 +193,15 @@ const navIndex = document.querySelector("#nav-index");
 const navTotal = document.querySelector("#nav-total");
 const recordThumbnail = document.querySelector("#record-thumbnail");
 const recordData = document.querySelector("#record-data");
+const duplicateSelectButton = document.querySelector("#duplicate-select");
+const recordSaveButton = document.querySelector("#record-save");
+const recordSaveStatus = document.querySelector("#record-save-status");
 
 const recordSet = {
     records: [],
     current: -1
 };
+let detailRequestId = 0;
 
 // ---- 1) Filtri ----
 function getFilters() {
@@ -224,7 +220,33 @@ function resetFilters() {
 }
 
 // ---- 2) Esecuzione query ----
-async function runQuery(filters) { }
+async function runQuery(filters) {
+    setQueryStatus("Ricerca in corso...");
+    try {
+        const response = await fetch("/api/preview/list", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...filters, profileName: profileSelector.value })
+        });
+        if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
+        const records = await response.json();
+        if (!Array.isArray(records)) throw new Error("Risposta non valida");
+        recordSet.records = records;
+        recordSet.current = -1;
+        if (records.length === 0) {
+            goToRecord(-1);
+            setQueryStatus("Nessun record trovato");
+            return;
+        }
+        setQueryStatus(`${records.length} record trovati`);
+        goToRecord(0);
+    } catch (error) {
+        console.error("Errore durante la ricerca:", error);
+        recordSet.records = [];
+        goToRecord(-1);
+        setQueryStatus("Errore durante la ricerca");
+    }
+}
 function setQueryStatus(message) {
     queryStatus.textContent = message ?? "";
 }
@@ -234,6 +256,7 @@ function goToRecord(index) {
     const total = recordSet.records.length;
     if (total === 0) {
         recordSet.current = -1;
+        detailRequestId++;
         updateNavigation();
         clearRecord();
         return;
@@ -266,37 +289,121 @@ function updateNavigation() {
 }
 
 // ---- 4) Visualizzazione record ----
-let detailRequestId = 0;
-
 async function showRecord(record) {
-    const { fullname } = record;
     const requestId = ++detailRequestId;
-    const detail = await requestJson("/api/records/detail?fullname=" + encodeURIComponent(fullname));
-    // Ignora risposte arrivate dopo una navigazione successiva
-    if (requestId !== detailRequestId) return;
-
-    if (!detail || Array.isArray(detail)) {
-        clearRecord();
-        setQueryStatus("Dettaglio non disponibile per " + fullname);
-        return;
-    }
-
-    for (const cell of recordData.querySelectorAll("[data-field]")) {
-        const value = detail[cell.dataset.field];
-        cell.textContent = value ?? "";
-    }
-    // Il thumbnail è salvato come data URL JPEG da scan-thumbnail
-    if (typeof detail.thumbnail === "string" && detail.thumbnail.startsWith("data:image/")) {
-        recordThumbnail.src = detail.thumbnail;
-    } else {
-        recordThumbnail.removeAttribute("src");
+    clearRecord();
+    try {
+        const detailParams = new URLSearchParams({ fullname: record.fullname, profileName: profileSelector.value });
+        const response = await fetch("/api/records/detail?" + detailParams);
+        if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
+        const detail = await response.json();
+        console.log("Detail response:", detail);
+        if (requestId !== detailRequestId) return;
+        if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+            throw new Error("Dettaglio non disponibile");
+        }
+        for (const cell of recordData.querySelectorAll("[data-field]")) {
+            const value = detail[cell.dataset.field];
+            if (cell.type === "checkbox") {
+                cell.checked = value === null || value === undefined || value === "" || value === true || Number(value) === 1;
+            } else if (cell.type === "datetime-local") {
+                cell.value = toDateTimeLocal(value);
+            } else {
+                cell.textContent = Array.isArray(value) ? value.join(", ") : value ?? "";
+            }
+        }
+        if (typeof detail.thumbnail === "string" && detail.thumbnail.startsWith("data:image/")) {
+            recordThumbnail.src = detail.thumbnail;
+        }
+        duplicateSelectButton.disabled = Number(detail.duplicateCount) < 2;
+        duplicateSelectButton.textContent = Number(detail.valido) === 1
+            ? "Già selezionato come valido"
+            : "Seleziona come unico valido";
+        recordSaveButton.disabled = true;
+        recordSaveStatus.textContent = "";
+    } catch (error) {
+        if (requestId !== detailRequestId) return;
+        console.error("Errore caricamento dettaglio:", error);
+        setQueryStatus("Dettaglio non disponibile per il record selezionato");
     }
 }
 function clearRecord() {
     for (const cell of recordData.querySelectorAll("[data-field]")) {
-        cell.textContent = "";
+        if (cell.type === "checkbox") cell.checked = false;
+        else if (cell.type) cell.value = "";
+        else cell.textContent = "";
     }
     recordThumbnail.removeAttribute("src");
+    duplicateSelectButton.disabled = true;
+    recordSaveButton.disabled = true;
+    recordSaveStatus.textContent = "";
+}
+
+function toDateTimeLocal(value) {
+    if (value === null || value === undefined || value === "") return "";
+    const text = String(value).trim();
+    const exifDate = /^(\d{4})[:/](\d{2})[:/](\d{2})[ T](\d{2}):(\d{2})/.exec(text);
+    if (exifDate) return `${exifDate[1]}-${exifDate[2]}-${exifDate[3]}T${exifDate[4]}:${exifDate[5]}`;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return text;
+
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return "";
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return localDate.toISOString().slice(0, 16);
+}
+
+async function saveRecord() {
+    const record = recordSet.records[recordSet.current];
+    if (!record || recordSaveButton.disabled) return;
+
+    const dateValue = recordData.querySelector('[data-field="dt_valida"]').value;
+    const valido = recordData.querySelector('[data-field="valido"]').checked;
+    recordSaveButton.disabled = true;
+    recordSaveStatus.textContent = "Salvataggio...";
+    try {
+        const response = await fetch("/api/records/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                profileName: profileSelector.value,
+                fullname: record.fullname,
+                dtValida: dateValue || null,
+                valido
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `Errore HTTP: ${response.status}`);
+        if (recordSet.records[recordSet.current]?.fullname === record.fullname) {
+            await showRecord(record);
+        }
+        recordSaveStatus.textContent = "Modifiche salvate";
+    } catch (error) {
+        console.error("Errore salvataggio record:", error);
+        recordSaveStatus.textContent = error.message || "Errore durante il salvataggio";
+        recordSaveButton.disabled = false;
+    }
+}
+
+async function selectValidDuplicate() {
+    const record = recordSet.records[recordSet.current];
+    if (!record || duplicateSelectButton.disabled) return;
+
+    duplicateSelectButton.disabled = true;
+    try {
+        const response = await fetch("/api/records/duplicates/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profileName: profileSelector.value, fullname: record.fullname })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `Errore HTTP: ${response.status}`);
+        await runQuery(getFilters());
+        setQueryStatus("Duplicato selezionato come unico valido");
+    } catch (error) {
+        console.error("Errore selezione duplicato:", error);
+        setQueryStatus(error.message || "Errore durante la selezione del duplicato");
+        duplicateSelectButton.disabled = false;
+    }
 }
 
 // ---- Listener preview ----
@@ -310,3 +417,7 @@ navPrev.addEventListener("click", () => goPrev());
 navNext.addEventListener("click", () => goNext());
 navLast.addEventListener("click", () => goLast());
 navIndex.addEventListener("change", () => goToRecord(Number(navIndex.value) - 1));
+duplicateSelectButton.addEventListener("click", () => selectValidDuplicate());
+recordData.addEventListener("input", () => { recordSaveButton.disabled = false; });
+recordData.addEventListener("change", () => { recordSaveButton.disabled = false; });
+recordSaveButton.addEventListener("click", () => saveRecord());

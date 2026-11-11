@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // API
-import apiRoutes from './routes/api.js';
+import apiRoutes, { initializeArchiveCache } from './routes/api.js';
 app.use('/api', apiRoutes);
 
 // Pagina principale
@@ -33,6 +33,9 @@ app.use((req, res) => {
         message: 'Risorsa non trovata'
     });
 });
+
+// Carica gli archivi prima di accettare richieste
+await initializeArchiveCache();
 
 // Avvio server
 app.listen(PORT, () => {

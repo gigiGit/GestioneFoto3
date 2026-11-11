@@ -35,6 +35,7 @@
 
         .sezione-destra {
             background-color: #f5f5f5;
+            width: 100%;
         }
 
         h2 {
@@ -51,7 +52,10 @@
                 flex-direction: column;
             }
 
-            .sezione-sinistra,
+            .sezione-sinistra{
+                width: 30%;
+                min-height: 50vh;
+            }
             .sezione-destra {
                 width: 100%;
                 min-height: 50vh;
@@ -82,7 +86,7 @@
                 <div><button id="preview" class="job-button" onclick="preview()">...</button>Preview</div>
             </section>
 
-            <section class="sezione-destra">
+            <section class="sezione-destra" style="width: 100%;">
                 <div id="preview-container" class="panel preview-panel">
                     <!-- 1) Filtri -->
                     <form id="query-form">
@@ -123,6 +127,9 @@
                                     </select>
                                 </td>
                             </tr>
+                            <tr>
+                                <td colspan="4"><label><input id="filter-duplicates" name="duplicates" type="checkbox" value="1"> Solo duplicati (hash condiviso)</label></td>
+                            </tr>
                         </table>
 
                         <!-- 2) Esecuzione query -->
@@ -143,24 +150,34 @@
                         <button id="nav-last" type="button" class="job-button" title="Ultimo">&gt;|</button>
                     </div>
 
+                    <div class="query-actions">
+                        <button id="duplicate-select" type="button" class="job-button" disabled>Seleziona come unico valido</button>
+                    </div>
+
                     <!-- 4) Dati del record -->
                     <div id="record-view" class="record-view">
-                        <img id="record-thumbnail" alt="thumbnail" style="max-width:320px; max-height:320px;">
-                        <table id="record-data" style="width:100%;">
-                            <tr><td>Nome</td><td data-field="name"></td></tr>
-                            <tr><td>Percorso</td><td data-field="fullname"></td></tr>
-                            <tr><td>Estensione</td><td data-field="ext"></td></tr>
-                            <tr><td>Dimensione</td><td data-field="size"></td></tr>
-                            <tr><td>Data valida</td><td data-field="dt_valida"></td></tr>
-                            <tr><td>Creato il</td><td data-field="createdAt"></td></tr>
-                            <tr><td>EXIF CreateDate</td><td data-field="exifCreateDate"></td></tr>
-                            <tr><td>EXIF DateTimeOriginal</td><td data-field="exifDateTimeOriginal"></td></tr>
-                            <tr><td>EXIF GPSDateStamp</td><td data-field="exifGPSDateStamp"></td></tr>
-                            <tr><td>EXIF ModifyDate</td><td data-field="exifModifyDate"></td></tr>
-                            <tr><td>Album</td><td data-field="albums"></td></tr>
-                            <tr><td>Valido</td><td data-field="valido"></td></tr>
-                            <tr><td>Hash</td><td data-field="hash"></td></tr>
-                        </table>
+                        <div class="record-media">
+                            <img id="record-thumbnail" alt="Miniatura del file">
+                        </div>
+                        <dl id="record-data" class="record-data">
+                            <div class="record-field"><dt>Nome</dt><dd data-field="name"></dd></div>
+                            <div class="record-field record-field-wide"><dt>Percorso</dt><dd data-field="fullname"></dd></div>
+                            <div class="record-field"><dt>Estensione</dt><dd data-field="ext"></dd></div>
+                            <div class="record-field"><dt>Dimensione</dt><dd data-field="size"></dd></div>
+                            <div class="record-field"><dt>Data valida</dt><dd><input data-field="dt_valida" class="record-date-input" type="datetime-local"></dd></div>
+                            <div class="record-field"><dt>Creato il</dt><dd data-field="createdAt"></dd></div>
+                            <div class="record-field"><dt>EXIF CreateDate</dt><dd data-field="exifCreateDate"></dd></div>
+                            <div class="record-field"><dt>EXIF DateTimeOriginal</dt><dd data-field="exifDateTimeOriginal"></dd></div>
+                            <div class="record-field"><dt>EXIF GPSDateStamp</dt><dd data-field="exifGPSDateStamp"></dd></div>
+                            <div class="record-field"><dt>EXIF ModifyDate</dt><dd data-field="exifModifyDate"></dd></div>
+                            <div class="record-field"><dt>Album</dt><dd data-field="albums"></dd></div>
+                            <div class="record-field"><dt>Valido</dt><dd><input data-field="valido" class="record-valid-input" type="checkbox" aria-label="File valido"></dd></div>
+                            <div class="record-field record-field-wide"><dt>Hash</dt><dd data-field="hash"></dd></div>
+                        </dl>
+                        <div class="record-actions">
+                            <button id="record-save" type="button" class="job-button" disabled>Salva modifiche</button>
+                            <span id="record-save-status" role="status"></span>
+                        </div>
                     </div>
                 </div>
                 <div id="profile-container" class="panel profile-panel">

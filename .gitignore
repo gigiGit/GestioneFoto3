@@ -1,2 +1,4 @@
 node_modules
 package-lock.json
+scan/archive.sql
+scan/archive.db
