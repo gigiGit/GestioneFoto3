@@ -1,6 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs/promises");
-const scanTools = require("../scan-tools.cjs");
+
 const sqlite3 = require("sqlite3");
 const IMAGE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif"

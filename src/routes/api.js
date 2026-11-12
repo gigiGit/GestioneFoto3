@@ -3,8 +3,8 @@ import express from 'express';
 const router = express.Router();
 import fs from 'fs';
 import path from 'path';
-import { readExifFromArchive } from '../services/scan-exif.js';
-import { readThumbnailFromArchive } from '../services/scan-exif.js';
+import { readExifFromArchive,readThumbnailFromArchive } from '../services/scan-analyze.js';
+
 const profili = {};
 // API di verifica server
 router.get('/health', (req, res) => {

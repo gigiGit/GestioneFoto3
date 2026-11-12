@@ -7,7 +7,7 @@ import sharp from "sharp";
 import exifr from "exifr";
 
 
-function toLocalISOString(date) {
+export function toLocalISOString(date) {
   const offset = -date.getTimezoneOffset();
   const sign = offset >= 0 ? '+' : '-';
   const pad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
@@ -44,16 +44,16 @@ export function recuperaDataDaNome(file) {
   const filename = typeof file.name === "string"
     ? file.name.toLowerCase()
     : typeof file.fullname === "string" ? path.basename(file.fullname).toLowerCase() : "";
-  var pattern=[/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/,/(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})/,/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/,/(\d{4})(\d{2})(\d{2})_(\d{2})-(\d{2})-(\d{2})/,
+  var pattern = [/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/, /(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})/, /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/, /(\d{4})(\d{2})(\d{2})_(\d{2})-(\d{2})-(\d{2})/,
     /screenshot_(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/
   ];
-  
+
   for (const p of pattern) {
     if (filename.match(p)) {
-      var dateArray=filename.match(p);
-      if(dateArray.length < 7) continue;
+      var dateArray = filename.match(p);
+      if (dateArray.length < 7) continue;
       print(`Filename matches pattern: ${filename} ${p}`);
-      var date=`${dateArray[1]}-${dateArray[2]}-${dateArray[3]} ${dateArray[4]}:${dateArray[5]}:${dateArray[6]}`;
+      var date = `${dateArray[1]}-${dateArray[2]}-${dateArray[3]} ${dateArray[4]}:${dateArray[5]}:${dateArray[6]}`;
       print(`${filename} - Matched date: ${date}`);
       return toLocalISOString(new Date(date));
     }
@@ -61,7 +61,7 @@ export function recuperaDataDaNome(file) {
   if (filename >= "1900" && filename < "2030") {
     // Formato YYYY-MM-DD_HH-MM-SS
     var date = filename.slice(0, 4) + "-" + filename.slice(5, 7) + "-" + filename.slice(8, 10) + " " + isOraValid(filename.slice(11, 13)) + ":" + isOraValid(filename.slice(14, 16)) + ":" + isOraValid(filename.slice(16, 18));
-      print(`1 Trying date from filename: ${date}`, filename);
+    print(`1 Trying date from filename: ${date}`, filename);
     try {
       return toLocalISOString(new Date(date));
     } catch {
@@ -69,12 +69,12 @@ export function recuperaDataDaNome(file) {
       var date = filename.slice(0, 4) + "-" + filename.slice(5, 7) + "-" + filename.slice(8, 10) + " " + isOraValid(filename.slice(11, 13)) + ":" + isOraValid(filename.slice(13, 15)) + ":" + isOraValid(filename.slice(15, 17));
       print(`2 Trying date from filename: ${date}`, filename);
       try {
-        
+
         return toLocalISOString(new Date(date));
       } catch {
         // Formato YYYYMMDD_HHMMSS senza trattini tra data e ora
         var date = filename.slice(0, 4) + "-" + filename.slice(4, 6) + "-" + filename.slice(6, 8) + " " + isOraValid(filename.slice(9, 11)) + ":" + isOraValid(filename.slice(11, 13)) + ":" + isOraValid(filename.slice(13, 15));
-      print(`3 Trying date from filename: ${date}`, filename);
+        print(`3 Trying date from filename: ${date}`, filename);
         try {
           return toLocalISOString(new Date(date));
         } catch {
@@ -201,13 +201,12 @@ function recuperaDataDaFullName(file) {
   return null;
 }
 
-async function analisiDate(file, force = true) {
+export async function analisiDate(file, pendingFiles, { force = false }) {
 
   if (force || file.dt_valida === null || file.dt_valida === undefined) {
     try {
       let bestTry = file.exifDateTimeOriginal ?? file.exifCreateDate ?? file.exifGPSDateStamp ?? file.exifModifyDate;
       if (!(bestTry > "1900" && bestTry < "2030")) {
-
         bestTry = null;
       }
       var dateFrom = "exif";
@@ -225,6 +224,7 @@ async function analisiDate(file, force = true) {
       }
       file.dt_valida = toLocalISOString(new Date(bestTry));
       file.dateFrom = dateFrom;
+      pendingFiles.push(file);
     } catch (error) {
       console.error(`Error generating analisiDate for ${file.fullname}:`, error);
       file.dt_valida = null;
@@ -232,19 +232,20 @@ async function analisiDate(file, force = true) {
   }
 }
 
-async function analisiAlbum(file) {
-  if (file.albums === null || file.albums === undefined)
-    file.albums = [];
+export async function analisiAlbum(file, pendingFiles, { force = false }) {
+  if (!(force || file.albums === null || file.albums === undefined)) return
+
   try {
     const normalizedPath = path.normalize(file.fullname);
     const dirs = normalizedPath.split(path.sep);
     file.albums = dirs.slice(1, -1);
     file.valido = true;
+    pendingFiles.push(file);
   } catch (error) {
     console.error(`Error generating Albums for ${file.fullname}:`, error);
   }
 }
-export function hashFile(filePath) {
+export async function old_analisiThumbnail(file) {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
     const stream = createReadStream(filePath);
@@ -280,33 +281,6 @@ export async function analisi(archive) {
   }
   return files;
 }
-export async function analisiFromArchive(archive, funcName) {
-  let count = 0;
-  let pendingFiles = [];
-  const files = [];
-  try {
-    await fs.access(archive);
-    files.push(...await readArchiveFiles(archive));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const cb = funcName === "analisiDate" ? analisiDate : funcName === "analisiAlbum" ? analisiAlbum : null;
-  if (!cb) throw new Error(`Invalid function name: ${funcName}`);
-  for (const file of files) {
-    await cb(file);
-    count++;
-    pendingFiles.push(file);
-    if (count % 100 === 0) console.log(`Processed ${count} files for ${funcName} analysis, pending writes: ${pendingFiles.length}`);
-    if (pendingFiles.length >= 100) {
-      await writeArchiveFiles(archive, pendingFiles);
-      pendingFiles = [];
-    }
-  }
-  if (pendingFiles.length > 0) {
-    await writeArchiveFiles(archive, pendingFiles);
-  }
-  return files;
-}
 
 //await analisiFromArchive("scan\\archive.db", analisiDate,"analisiDate");
 //await analisiFromArchive("scan\\archive.db", analisiAlbum,"analisiAlbum");
@@ -317,10 +291,11 @@ const IMAGE_EXTENSIONS = new Set([
 const THUMBNAIL_SIZE = 400;
 const THUMBNAIL_VERSION = 2;
 
-export async function createThumbnail(file) {
+export async function analisiThumbnail(file, pendingFiles, { force = false }) {
 
   const extension = path.extname(file.fullname).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) return file;
+  if (!force && file.thumbnail) return file;
   try {
     const thumbnail = await sharp(file.fullname)
       .rotate()
@@ -328,11 +303,10 @@ export async function createThumbnail(file) {
       .jpeg({ quality: 80 })
       .toBuffer();
     file.thumbnail = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
-    file.modified = true;
+    pendingFiles.push(file);
   } catch (error) {
     console.error(`Error generating thumbnail for ${file.fullname}:`, error);
     file.thumbnail = null;
-    file.modified = false;
   }
   return file;
 }
@@ -420,4 +394,27 @@ export async function readExifFromArchive(archive) {
 export async function readThumbnailFromArchive(archive) {
   const updatedFilelist = await readThumbnail(archive);
   return updatedFilelist;
+}
+const unsupportedExtensions = new Set([".mpg", ".pdf", ".m4v", ".wmv", ".mp4", ".mov", ".avi", ".mkv", ".gif", ".3gp", ".bmp"]);
+export async function analisiExif(file, pendingFiles, { force = false }) {
+  const ext = file.ext.toLowerCase();
+  if (unsupportedExtensions.has(ext)) return;
+  if (!force && (file.exifCreateDate || file.exifDateTimeOriginal || file.exifGPSDateStamp || file.exifModifyDate)) {
+    return;
+  }
+  try {
+    const exifData = await exifr.parse(file.fullname) ?? null;
+    file.exifCreateDate = exifData?.CreateDate ? new Date(exifData.CreateDate).toISOString() : null;
+    file.exifDateTimeOriginal = exifData?.DateTimeOriginal ? new Date(exifData.DateTimeOriginal).toISOString() : null;
+    file.exifGPSDateStamp = exifData?.GPSDateStamp ? new Date(exifData.GPSDateStamp).toISOString() : null;
+    file.exifModifyDate = exifData?.ModifyDate ? new Date(exifData.ModifyDate).toISOString() : null;
+    pendingFiles.push(file);
+  } catch (error) {
+    console.error(`Error reading EXIF data for ${file.fullname}:`, error);
+    file.exifCreateDate = null;
+    file.exifDateTimeOriginal = null;
+    file.exifGPSDateStamp = null;
+    file.exifModifyDate = null;
+  }
+
 }

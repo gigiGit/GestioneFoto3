@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readArchiveFiles, writeArchiveFiles } from "./scan-archive.cjs";
+import { analisiExif,analisiThumbnail, analisiDate, analisiAlbum } from "./scan-analyze.js";
 export const SCAN_FILE_NAME = "scan.json";
 const EXIF_IMAGE_EXTENSIONS = Object.freeze([
   ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif",
@@ -139,6 +140,93 @@ async function main() {
   });
   console.log("Scan completed:", files.length);
 }
+export async function copia(file, pendingFiles,{baseDir=".",formato="YYYYMM"}) {
+  if(!file.valido) return;
+  const data=new Date(file.dt_valida)
+  const anno = data.getFullYear();
+  const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
+  const giorno = String(data.getDate()).padStart(2, '0');
+
+  const dataFormattata = formato==="YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese }`;
+
+  const destinationDir = dataFormattata;
+  const destPath = path.join(baseDir,"backup", destinationDir, file.name);
+  // Implement the copy functionality here
+  try {
+    //console.log(`Copying file ${file.fullname} to ${destPath}`);
+    //await fs.copyFile(file.fullname, destPath);
+    //pendingFiles.push(file);
+  } catch (error) {
+    console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
+  }
+}
+export async function linkAlbum(file, pendingFiles,{baseDir=".",formato="YYYYMM"}) {
+  if(!file.valido) return;
+  const data=new Date(file.dt_valida)
+  const anno = data.getFullYear();
+  const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
+  const giorno = String(data.getDate()).padStart(2, '0');
+  const dataFormattata = formato==="YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese }`;
+  const destinationDir = dataFormattata;
+  const srcPath = path.join(baseDir, "backup",destinationDir, file.name);
+  for(const album of file.albums) {
+    const destPath = path.join(baseDir, "albums", album, file.name);
+    try {
+      console.log(`Linking file ${srcPath} to ${destPath}`);
+      //await fs.symlink(srcPath, destPath);
+    } catch (error) {
+      console.error(`Error linking file ${srcPath} to ${destPath}:`, error);
+    }
+  }
+  // Implement the copy functionality here
+  try {
+    //console.log(`Copying file ${file.fullname} to ${destPath}`);
+    //await fs.copyFile(file.fullname, destPath);
+    //pendingFiles.push(file);
+  } catch (error) {
+    console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
+  }
+}
+
+export async function analisiFromArchive(archive, funcName,parametri) {
+  let count = 0;
+  let pendingFiles = [];
+  const files = [];
+  try {
+    await fs.access(archive);
+    files.push(...await readArchiveFiles(archive));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let cb =null;
+
+  let option = parametri || {};
+  switch (funcName) {
+    case "analisiDate": cb = analisiDate;; break;
+    case "analisiAlbum": cb = analisiAlbum; break;
+    case "analisiExif": cb = analisiExif; break;
+    case "analisiThumbnail": cb = analisiThumbnail; break;
+    case "copia":cb = copia; break;
+    case "linkAlbum":cb = linkAlbum; break;
+    default:
+      throw new Error(`Invalid function name: ${funcName}`);
+  }
+  if (!option.count) option.count=500;
+  for (const file of files) {
+    await cb(file,pendingFiles,option);
+    count++;
+    if (count % option.count === 0) console.log(`Processed ${count} files for ${funcName} - pending writes: ${pendingFiles.length}`);
+    if (pendingFiles.length >= option.count) {
+      await writeArchiveFiles(archive, pendingFiles);
+      pendingFiles = [];
+    }
+  }
+  if (pendingFiles.length > 0) {
+    await writeArchiveFiles(archive, pendingFiles);
+  }
+  return files;
+}
+
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => {
