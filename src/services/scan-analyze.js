@@ -19,8 +19,80 @@ function creaData(year, month, day, hour = 0, minute = 0, second = 0) {
   }
   return date;
 }
-
 function recuperaDataDaNome(file) {
+  function isOraValid(txt){
+    return Number(txt) ? txt:"00";
+  }
+  const filename = typeof file.name === "string"
+    ? file.name
+    : typeof file.fullname === "string" ? path.basename(file.fullname) : "";
+
+  if (filename >= "1900" && filename < "2030") {
+    var date = filename.slice(0, 4)+"-"+filename.slice(5, 7)+"-"+filename.slice(8, 10)+" "+isOraValid(filename.slice(11, 13))+":"+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+    var date = filename.slice(0, 4)+"-"+filename.slice(4, 6)+"-"+filename.slice(6, 8)+" "+isOraValid(filename.slice(9, 11))+":"+isOraValid(filename.slice(11, 13))+":"+isOraValid(filename.slice(13, 15));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+    }
+  }
+  if (filename >= "img-1900" && filename < "img-2030") {
+    var date = filename.slice(4, 8)+"-"+filename.slice(8, 10)+"-"+filename.slice(10, 12)+" "+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17))+":"+isOraValid(filename.slice(17, 19));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  if (filename >= "IMG-1900" && filename < "IMG-2030") {
+    var date = filename.slice(4, 8)+"-"+filename.slice(8, 10)+"-"+filename.slice(10, 12)+" "+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17))+":"+isOraValid(filename.slice(17, 19));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  if (filename >= "IMG_1900" && filename < "IMG_2030") {
+    var date = filename.slice(4, 8)+"-"+filename.slice(8, 10)+"-"+filename.slice(10, 12)+" "+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17))+":"+isOraValid(filename.slice(17, 19));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  if (filename >= "VID1900" && filename < "VID2030") {
+    var date = filename.slice(3, 7)+"-"+filename.slice(7, 9)+"-"+filename.slice(9, 11)+" "+isOraValid(filename.slice(11, 13))+":"+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+
+  if (filename >= "VID-1900" && filename < "VID-2030") {
+    var date = filename.slice(4, 8)+"-"+filename.slice(8, 10)+"-"+filename.slice(10, 12)+" "+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17))+":"+isOraValid(filename.slice(17, 19));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  if (filename >= "VID_1900" && filename < "VID_2030") {
+    var date = filename.slice(4, 8)+"-"+filename.slice(8, 10)+"-"+filename.slice(10, 12)+" "+isOraValid(filename.slice(13, 15))+":"+isOraValid(filename.slice(15, 17))+":"+isOraValid(filename.slice(17, 19));
+    try {
+      return new Date(date).toISOString();
+    } catch {
+      return null;
+    }
+  }
+
+}
+
+function recuperaDataDaFullName(file) {
   const filename = typeof file.name === "string"
     ? file.name
     : typeof file.fullname === "string" ? path.basename(file.fullname) : "";
@@ -70,15 +142,17 @@ async function analisiDate(file,force=true) {
   if (force || file.dt_valida === null || file.dt_valida === undefined) {
     try {
       let bestTry = file.exifDateTimeOriginal ?? file.exifCreateDate ?? file.exifGPSDateStamp ?? file.exifModifyDate;
-      if(!(bestTry > new Date("1900-01-01") && bestTry < new Date("2030-01-01"))) {
+      if(!(bestTry > "1900" && bestTry < "2030")) {
+        
         bestTry = null;
       }
       var dateFrom = "exif";
       if (bestTry === null || bestTry === undefined) {
         bestTry = recuperaDataDaNome(file);
-        if(bestTry > new Date("1900-01-01") && bestTry < new Date("2030-01-01")) {
+        if(bestTry > "1900" && bestTry < "2030") {
           var dateFrom = "Nome";
         }else{
+          console.log(`Invalid Nome date for ${file.fullname}:`, bestTry);
           bestTry = null;
         }
       }
