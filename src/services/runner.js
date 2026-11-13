@@ -91,12 +91,12 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
     const { force = false } = parametri;
     const extension = path.extname(file.fullname).toLowerCase();
     if (!supportedExtensions.has(extension)) return true;
-    if (!file.valido) return true;
-    if (!force && file.thumbnail) return true;
+    //if (!force && !file.thumbnail && file.valido)
+    //    return true;
     try {
         const thumbnail = await sharp(file.fullname)
             .rotate()
-            .resize({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, fit: "inside", withoutEnlargement: true })
+            .resize({ width: THUMBNAIL_SIZE, fit: "inside", withoutEnlargement: true })
             .jpeg({ quality: 80 })
             .toBuffer();
         file.thumbnail = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
