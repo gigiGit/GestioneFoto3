@@ -461,15 +461,15 @@ router.get("/records/detail", async (req, res) => {
 });
 var Runner = false;
 router.post("/jobs/runner", async (req, res) => {
-    const { sourceDir, destDir, archive, runner,formato } = req.body ?? {};
+    const parametri = req.body ?? {};
     console.log(req.body);
     if (Runner) {
         res.status(409).json({ error: "Attività già in corso per questo profilo" });
         return;
     }
     Runner = true;
-    analisiFromArchive(archive, runner, { baseDir: destDir, formato: formato })
-        .then(result => res.json({ success: true, result: result.length }))
+    analisiFromArchive(parametri.runner,parametri.profile)
+        .then(result => res.json({ success: true, count: result.count, errorCount: result.errorCount,files: result.files }))
         .catch(error => res.status(500).json({ error: error.message }))
         .finally(() => { Runner = false; });
 });

@@ -5,7 +5,7 @@ const profileForm = document.querySelector("#profile-form");
 const jobScan = document.querySelector("#job-scan");
 const jobExif = document.querySelector("#job-exif");
 const jobAnalisi = document.querySelector("#job-analisi");
-const jobPurge = document.querySelector("#job-purge");
+const jobAlbum = document.querySelector("#job-album");
 const jobThumbnail = document.querySelector("#job-thumbnail");
 const jobCopia = document.querySelector("#job-copia");
 const previewButton = document.querySelector("#preview");
@@ -64,12 +64,9 @@ profileForm.addEventListener("submit", event => {
     event.preventDefault();
     saveProfile();
 });
-
-async function saveProfile() {
-    const profileStatus = document.querySelector("#profile-status");
-    const profileSave = document.querySelector("#profile-save");
+function getProfileData() {
     const elements = profileForm.elements;
-    const profile = {
+    return {
         name: elements.name.value.trim(),
         sourceFolders: elements.sourceFolders.value,
         destDir: elements.destDir.value,
@@ -82,6 +79,12 @@ async function saveProfile() {
         verbose: elements.verbose.checked,
         extensions: elements.extensions.value.split(",").map(ext => ext.trim()).filter(Boolean)
     };
+}
+async function saveProfile() {
+    const profileStatus = document.querySelector("#profile-status");
+    const profileSave = document.querySelector("#profile-save");
+    const elements = profileForm.elements;
+    const profile = getProfileData();
 
     profileSave.disabled = true;
     profileStatus.textContent = "Salvataggio in corso...";
@@ -116,41 +119,6 @@ profileSelector.addEventListener("change", () => {
 
 
 
-async function startScan(type = "scan") {
-    if (!profileSelector.value) {
-        return;
-    }
-
-    const elements = profileForm.elements;
-    const profile = {
-        name: elements.name.value.trim(),
-        sourceFolders: elements.sourceFolders.value,
-        destDir: elements.destDir.value,
-        scanDir: elements.scanDir.value,
-        archive: elements.archive.value,
-        backupPath: elements.backupPath.value,
-        albumPath: elements.albumPath.value,
-        batchSize: Number(elements.batchSize.value),
-        minSize: Number(elements.minSize.value),
-        verbose: elements.verbose.checked,
-        extensions: elements.extensions.value.split(",").map(ext => ext.trim()).filter(Boolean)
-    };
-
-    try {
-        const response = await fetch(`/api/jobs/${type}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileName: profile.name, scanDir: profile.scanDir, sourceDir: profile.sourceFolders, archive: profile.archive })
-        });
-        const data = await response.json();
-        console.log(data);
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-
-
 
 
 function disableJobButtons(disabled) {
@@ -159,35 +127,26 @@ function disableJobButtons(disabled) {
     jobAnalisi.disabled = disabled;
     jobThumbnail.disabled = disabled;
     jobCopia.disabled = disabled;
+    jobAlbum.disabled = disabled;
 }
 jobScan.addEventListener("click", () => startJob("scan"));
 jobExif.addEventListener("click", () => startJob("exif"));
 jobAnalisi.addEventListener("click", () => startJob("analisi"));
 jobThumbnail.addEventListener("click", () => startJob("thumbnail"));
 jobCopia.addEventListener("click", () => startJob("copia"));
-//jobAlbum.addEventListener("click", () => startJob("album"));
+jobAlbum.addEventListener("click", () => startJob("album"));
 //jobBackup.addEventListener("click", () => startJob("backup"));
 function startJob(type) {
     disableJobButtons(true);
+    const parametri  = getProfileData();
+   
     requestJson("/api/jobs/runner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            sourceDir: profileForm.elements.sourceFolders.value,
-            destDir: profileForm.elements.destDir.value,
-            archive: profileForm.elements.archive.value,
-            scanDir: profileForm.elements.scanDir.value,
-            verbose: profileForm.elements.verbose.checked,
-            batchSize: Number(profileForm.elements.batchSize.value),
-            minSize: Number(profileForm.elements.minSize.value),
-            extensions: profileForm.elements.extensions.value.split(",").map(ext => ext.trim()).filter(Boolean),
-            albumPath: profileForm.elements.albumPath.value,
-            backupPath: profileForm.elements.backupPath.value,
-            formato:"YYYYMM",
-            runner: type
-        })
+        body: JSON.stringify({profile: parametri,runner:type})
     }).then(message => {
-        console.log(message);
+        console.log("Elaborati:",message.count);
+         console.log("Errori:", message.errorCount);
     }).finally(() => disableJobButtons(false));
 }
 

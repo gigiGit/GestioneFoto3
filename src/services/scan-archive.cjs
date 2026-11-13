@@ -7,8 +7,8 @@ const IMAGE_EXTENSIONS = new Set([
 ]);
 const INSERT_SQL = `INSERT INTO raw_files (
   hash, fullname, name, ext, dt_valida, size, createdAt,
-  exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`;
+  exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido,destPath
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function run(db, sql, values = []) {
   return new Promise((resolve, reject) => {
@@ -23,7 +23,7 @@ async function upsertFiles(db, files) {
   const columns = [
     "hash", "fullname", "name", "ext", "dt_valida", "size", "createdAt",
     "exifCreateDate", "exifDateTimeOriginal", "exifGPSDateStamp", "exifModifyDate",
-    "thumbnail", "albums", "valido"
+    "thumbnail", "albums", "valido", "destPath"
   ];
   const assignments = columns.map(column => `${column} = COALESCE(?, ${column})`).join(", ");
   const placeholders = columns.map(() => "?").join(", ");
@@ -122,7 +122,7 @@ function mapArchivedRecord(record) {
   return { ...record, albums: deserializeAlbums(record.albums) };
 }
 
-async function readArchiveFiles(archivePath, filters = {},sellist="*") {
+async function readArchiveFiles(archivePath, filters = {}, sellist = "*") {
   const db = await openReadOnlyDatabase(path.resolve(archivePath));
   try {
     const conditions = [];
@@ -149,8 +149,12 @@ async function readArchiveFiles(archivePath, filters = {},sellist="*") {
       conditions.push("date(dt_valida) <= date(?)");
       values.push(text(filters.dateTo));
     }
+    if (filters.rowcount) {
+      conditions.push("rowid <= ?");
+      values.push(Number(filters.rowcount));
+    }
     if (filters.minSize !== undefined && filters.minSize !== null && filters.minSize !== "" &&
-        Number.isInteger(Number(filters.minSize)) && Number(filters.minSize) >= 0) {
+      Number.isInteger(Number(filters.minSize)) && Number(filters.minSize) >= 0) {
       conditions.push("size >= ?");
       values.push(Number(filters.minSize));
     }
@@ -166,6 +170,19 @@ async function readArchiveFiles(archivePath, filters = {},sellist="*") {
     const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
     const order = orderBy ? ` ORDER BY ${orderBy}` : "";
     const records = await all(db, `SELECT ${sellist} FROM raw_files ${where} ${order}`, values);
+    return records.map(mapArchivedRecord);
+  } finally {
+    await closeDatabase(db);
+  }
+}
+async function readSomeRecords(archivePath, rowcount = -1) {
+  const db = await openReadOnlyDatabase(path.resolve(archivePath));
+  var records;
+  try {
+    if (rowcount <= 0)
+      records = await all(db, `SELECT * FROM raw_files`);
+    else
+      records = await all(db, `SELECT * FROM raw_files WHERE rowid <= ?`, [Number(rowcount)]);
     return records.map(mapArchivedRecord);
   } finally {
     await closeDatabase(db);
@@ -201,7 +218,7 @@ async function listArchivedFiles(archivePath, { search = "", extension = "", dat
     const records = await all(
       db,
       `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
-              exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, ${albumsColumn},valido
+              exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, ${albumsColumn},valido,destPath
        FROM raw_files ${where}
        ORDER BY dt_valida DESC, name COLLATE NOCASE
        LIMIT ? OFFSET ?`,
@@ -236,7 +253,7 @@ async function updateArchivedFile(archivePath, { recordId, dtValida, albums }) {
       const record = await get(
         db,
         `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
-                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido
+                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums,valido,destPath
          FROM raw_files WHERE rowid = ?`,
         [recordId]
       );
@@ -292,7 +309,7 @@ async function updateArchiveRecord(archivePath, { fullname, dtValida, valido }) 
       const record = await get(
         db,
         `SELECT rowid AS recordId, hash, fullname, name, ext, dt_valida, size, createdAt,
-                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums, valido
+                exifCreateDate, exifDateTimeOriginal, exifGPSDateStamp, exifModifyDate, thumbnail, albums, valido,destPath
          FROM raw_files WHERE fullname = ?`,
         [fullname]
       );
@@ -358,7 +375,8 @@ async function initDB(db) {
     exifModifyDate TEXT,
     thumbnail TEXT,
     albums TEXT,
-    valido
+    valido Integer,
+    destPath TEXT
   )`;
 
   try {
@@ -391,6 +409,7 @@ async function batchUpdate(db, file) {
     file.exifModifyDate,
     file.thumbnail,
     file.valido,
+    file.destPath,
     JSON.stringify(Array.isArray(file.albums) ? file.albums : [])
   ].map(value => value ?? null);
 
@@ -471,7 +490,7 @@ module.exports = {
   updateArchivedFile,
   updateArchiveRecord,
   selectValidDuplicate,
-  upsertFiles
+  upsertFiles, readSomeRecords
 };
 
 if (require.main === module) {

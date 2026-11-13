@@ -4,30 +4,13 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { readArchiveFiles, writeArchiveFiles } from "./scan-archive.cjs";
-import { analisiExif,analisiThumbnail, analisiDate, analisiAlbum } from "./scan-analyze.js";
+import { readArchiveFiles, writeArchiveFiles, readSomeRecords } from "./scan-archive.cjs";
+import { linkAlbum, analisiExif, analisiThumbnail, copia, analisiDate, analisiAlbum } from "./runner.js";
 export const SCAN_FILE_NAME = "scan.json";
 const EXIF_IMAGE_EXTENSIONS = Object.freeze([
   ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif",
-  ".3gp",
-  ".JPG",
-  ".MOV",
-  ".avi",
-  ".bmp",
-  ".gif",
-  ".jpeg",
-  ".jpg",
-  ".m4v",
-  ".mov",
-  ".mp4",
-  ".mpg",
-  ".nef",
-  ".pdf",
-  ".png",
-  ".tif",
-  ".tiff",
-  ".wmv"
-]);
+  ".3gp", ".JPG", ".MOV", ".avi", ".bmp", ".gif", ".jpeg", ".jpg", ".m4v", ".mov",
+  ".mp4", ".mpg", ".nef", ".pdf", ".png", ".tif", ".tiff", ".wmv"]);
 
 const acceptedExtensions = new Set(EXIF_IMAGE_EXTENSIONS.map(extension => extension.toLowerCase()));
 
@@ -61,11 +44,11 @@ export async function scan({ sourceDir, archive, persist = true } = {}) {
 
   const filePaths = [];
   const files = [];
-  var pendingFiles=[];
+  var pendingFiles = [];
   let modified = false;
   try {
     await fs.access(archive);
-    files.push(...await readArchiveFiles(archive));
+    files.push(...await readArchiveFiles(archive, { filters: { rowcount: 10 } }));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -83,13 +66,13 @@ export async function scan({ sourceDir, archive, persist = true } = {}) {
           await writeArchiveFiles(archive, pendingFiles);
           console.log(`Wrote ${pendingFiles.length} new files to archive`);
         }
-        pendingFiles=[];
+        pendingFiles = [];
         modified = false;
       } else if (entry.isFile()) {
         if (files.find(f => f.fullname === filePath)) continue;
         // Skip files with extensions not in the accepted list
         if (!entry.isFile() || !acceptedExtensions.has(path.extname(entry.name).toLowerCase())) continue;
-        
+
         filePaths.push(filePath);
         const stats = await fs.stat(filePath);
         const name = path.basename(filePath);
@@ -102,7 +85,7 @@ export async function scan({ sourceDir, archive, persist = true } = {}) {
           createdAt: stats.ctime.toISOString(),
           hash: await hashFile(filePath)
         };
-        if(files.find(f => f.hash === file.hash)) continue;
+        if (files.find(f => f.hash === file.hash)) continue;
         modified = true;
         pendingFiles.push(file);
         files.push(file);
@@ -118,113 +101,60 @@ export async function scan({ sourceDir, archive, persist = true } = {}) {
 
 // ---- Modalità riga di comando ----
 // Uso: node src/services/scanner.js --source-dir=<cartella> --scan-dir=<cartella> [--verbose]
-async function main() {
-  const { values } = parseArgs({
-    options: {
-      "source-dir": { type: "string" },
-      "scan-dir": { type: "string" },
-      verbose: { type: "boolean", default: false }
-    }
-  });
 
-  if (!values["source-dir"] || !values["scan-dir"]) {
-    console.error("Uso: node src/services/scanner.js --source-dir=<cartella> --scan-dir=<cartella> [--verbose]");
-    process.exitCode = 1;
-    return;
-  }
-
-
-  const files = await scan({
-    sourceDir: values["source-dir"],
-    scanDir: values["scan-dir"]
-  });
-  console.log("Scan completed:", files.length);
-}
-export async function copia(file, pendingFiles,{baseDir=".",formato="YYYYMM"}) {
-  if(!file.valido) return;
-  const data=new Date(file.dt_valida)
-  const anno = data.getFullYear();
-  const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
-  const giorno = String(data.getDate()).padStart(2, '0');
-
-  const dataFormattata = formato==="YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese }`;
-
-  const destinationDir = dataFormattata;
-  const destPath = path.join(baseDir,"backup", destinationDir, file.name);
-  // Implement the copy functionality here
-  try {
-    //console.log(`Copying file ${file.fullname} to ${destPath}`);
-    //await fs.copyFile(file.fullname, destPath);
-    //pendingFiles.push(file);
-  } catch (error) {
-    console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
-  }
-}
-export async function linkAlbum(file, pendingFiles,{baseDir=".",formato="YYYYMM"}) {
-  if(!file.valido) return;
-  const data=new Date(file.dt_valida)
-  const anno = data.getFullYear();
-  const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
-  const giorno = String(data.getDate()).padStart(2, '0');
-  const dataFormattata = formato==="YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese }`;
-  const destinationDir = dataFormattata;
-  const srcPath = path.join(baseDir, "backup",destinationDir, file.name);
-  for(const album of file.albums) {
-    const destPath = path.join(baseDir, "albums", album, file.name);
-    try {
-      //console.log(`Linking file ${srcPath} to ${destPath}`);
-      //await fs.symlink(srcPath, destPath);
-    } catch (error) {
-      console.error(`Error linking file ${srcPath} to ${destPath}:`, error);
-    }
-  }
-  // Implement the copy functionality here
-  try {
-    //console.log(`Copying file ${file.fullname} to ${destPath}`);
-    //await fs.copyFile(file.fullname, destPath);
-    //pendingFiles.push(file);
-  } catch (error) {
-    console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
-  }
-}
-
-export async function analisiFromArchive(archive, funcName,parametri) {
+export async function analisiFromArchive(funcName, parametri) {
   let count = 0;
+  let errorCount = 0;
   let pendingFiles = [];
   const files = [];
+  const dt1 = new Date();
+  const archivePath = path.join(parametri.destDir, parametri.archive);
   try {
-    await fs.access(archive);
-    files.push(...await readArchiveFiles(archive));
+    await fs.access(archivePath);
+    files.push(...await readSomeRecords(archivePath, parametri.rowcount ?? 36));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  let cb =null;
+  let cb = null;
 
   let option = parametri || {};
   switch (funcName) {
+    case "exif": cb = analisiExif; break;
+    case "thumbnail": cb = analisiThumbnail; break;
+    case "linkAlbum": cb = linkAlbum; break;
+    case "copia": cb = copia; break;
     case "analisiDate": cb = analisiDate;; break;
+
     case "analisiAlbum": cb = analisiAlbum; break;
-    case "analisiExif": cb = analisiExif; break;
-    case "analisiThumbnail": cb = analisiThumbnail; break;
-    case "copia":cb = copia; break;
-    case "linkAlbum":cb = linkAlbum; break;
     default:
       throw new Error(`Invalid function name: ${funcName}`);
   }
-  if (!option.count) option.count=500;
+  if (!option.count) option.count = 500;
+
+  console.log(`Starting analysis for function: ${funcName}`);
+  console.log("archivePath:", archivePath);
+  const dt2 = new Date();
+  console.log(`Time elapsed since start: ${dt2 - dt1} ms`);
   for (const file of files) {
-    await cb(file,pendingFiles,option);
+    const exitCode = await cb(file, pendingFiles, option);
+    if (exitCode === false) errorCount++;
     count++;
-    if (count % option.count === 0) console.log(`Processed ${count} files for ${funcName} - pending writes: ${pendingFiles.length}`);
+    if (option.verbose && count % option.count === 0) console.log(`Processed ${count} files for ${funcName} - pending writes: ${pendingFiles.length}`);
     if (pendingFiles.length >= option.count) {
-      await writeArchiveFiles(archive, pendingFiles);
+      await writeArchiveFiles(archivePath, pendingFiles);
       pendingFiles = [];
     }
+
   }
   if (pendingFiles.length > 0) {
-    await writeArchiveFiles(archive, pendingFiles);
+    await writeArchiveFiles(archivePath, pendingFiles);
   }
-  return files;
+  console.log(`Analysis completed for function: ${funcName}`);
+  console.log(`Total files processed: ${count}`);
+  console.log(`Total errors: ${errorCount}`);
+  const dt3 = new Date();
+  console.log(`Total time elapsed: ${dt3 - dt1} ms`);
+  return { errorCount, count, files, readTime: dt2 - dt1, scanTime: dt3 - dt2,  TotalTime: dt3 - dt1 };
 }
 
 
