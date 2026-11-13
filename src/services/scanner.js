@@ -172,7 +172,7 @@ export async function linkAlbum(file, pendingFiles,{baseDir=".",formato="YYYYMM"
   for(const album of file.albums) {
     const destPath = path.join(baseDir, "albums", album, file.name);
     try {
-      console.log(`Linking file ${srcPath} to ${destPath}`);
+      //console.log(`Linking file ${srcPath} to ${destPath}`);
       //await fs.symlink(srcPath, destPath);
     } catch (error) {
       console.error(`Error linking file ${srcPath} to ${destPath}:`, error);

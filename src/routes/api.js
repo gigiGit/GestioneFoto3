@@ -3,7 +3,8 @@ import express from 'express';
 const router = express.Router();
 import fs from 'fs';
 import path from 'path';
-import { readExifFromArchive,readThumbnailFromArchive } from '../services/scan-analyze.js';
+import { readExifFromArchive, readThumbnailFromArchive } from '../services/scan-analyze.js';
+import {analisiFromArchive} from '../services/scanner.js';
 
 const profili = {};
 // API di verifica server
@@ -167,86 +168,86 @@ import { scan } from '../services/scanner.js';
 import { analisi } from '../services/scan-analyze.js';
 
 router.post("/jobs/scan", async (req, res) => {
-    const { sourceDir,  archive } = req.body ?? {};
+    const { sourceDir, archive } = req.body ?? {};
     console.log("SourceDir:", sourceDir, "archive:", archive);
     const scanKey = path.resolve(archive);
     if (pendingScans.has(scanKey)) {
         return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }    
-    const scanPromise = scan({sourceDir, archive},true)
-    .then((files)=>{ 
-        pendingScans.delete(scanKey); 
-        res.json({ success: true });
-        console.log(`Scan completed for archive: ${archive}`,files.length);
-    })
-    .catch(err => {
-        pendingScans.delete(scanKey);
-        console.error("Errore durante la scansione:", err);
-        res.status(500).json({ error: "Errore durante la scansione" });
-    });
+    }
+    const scanPromise = scan({ sourceDir, archive }, true)
+        .then((files) => {
+            pendingScans.delete(scanKey);
+            res.json({ success: true });
+            console.log(`Scan completed for archive: ${archive}`, files.length);
+        })
+        .catch(err => {
+            pendingScans.delete(scanKey);
+            console.error("Errore durante la scansione:", err);
+            res.status(500).json({ error: "Errore durante la scansione" });
+        });
     pendingScans.set(scanKey, scanPromise);
 
 });
 router.post("/jobs/exif", async (req, res) => {
-    const { sourceDir,  archive } = req.body ?? {};
+    const { sourceDir, archive } = req.body ?? {};
     console.log("SourceDir:", sourceDir, "archive:", archive);
     const scanKey = path.resolve(archive);
     if (pendingScans.has(scanKey)) {
         return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }    
-    const scanPromise = readExifFromArchive( archive)
-    .then((files)=>{ 
-        pendingScans.delete(scanKey); 
-        res.json({ success: true });
-        console.log(`Scan completed for archive: ${archive}`,files.length);
-    })
-    .catch(err => {
-        pendingScans.delete(scanKey);
-        console.error("Errore durante la scansione:", err);
-        res.status(500).json({ error: "Errore durante la scansione" });
-    });
+    }
+    const scanPromise = readExifFromArchive(archive)
+        .then((files) => {
+            pendingScans.delete(scanKey);
+            res.json({ success: true });
+            console.log(`Scan completed for archive: ${archive}`, files.length);
+        })
+        .catch(err => {
+            pendingScans.delete(scanKey);
+            console.error("Errore durante la scansione:", err);
+            res.status(500).json({ error: "Errore durante la scansione" });
+        });
     pendingScans.set(scanKey, scanPromise);
 
 });
 router.post("/jobs/analisi", async (req, res) => {
-    const { sourceDir,  archive } = req.body ?? {};
+    const { sourceDir, archive } = req.body ?? {};
     console.log("SourceDir:", sourceDir, "archive:", archive);
     const scanKey = path.resolve(archive);
     if (pendingScans.has(scanKey)) {
         return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }    
-    const scanPromise = analisi( archive)
-    .then((files)=>{ 
-        pendingScans.delete(scanKey); 
-        res.json({ success: true });
-        console.log(`Scan completed for archive: ${archive}`,files.length);
-    })
-    .catch(err => {
-        pendingScans.delete(scanKey);
-        console.error("Errore durante la scansione:", err);
-        res.status(500).json({ error: "Errore durante la scansione" });
-    });
+    }
+    const scanPromise = analisi(archive)
+        .then((files) => {
+            pendingScans.delete(scanKey);
+            res.json({ success: true });
+            console.log(`Scan completed for archive: ${archive}`, files.length);
+        })
+        .catch(err => {
+            pendingScans.delete(scanKey);
+            console.error("Errore durante la scansione:", err);
+            res.status(500).json({ error: "Errore durante la scansione" });
+        });
     pendingScans.set(scanKey, scanPromise);
 
 });
 router.post("/jobs/thumbnail", async (req, res) => {
-    const { sourceDir,  archive } = req.body ?? {};
+    const { sourceDir, archive } = req.body ?? {};
     console.log("SourceDir:", sourceDir, "archive:", archive);
     const scanKey = path.resolve(archive);
     if (pendingScans.has(scanKey)) {
         return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }    
-    const scanPromise = readThumbnailFromArchive( archive)
-    .then((files)=>{ 
-        pendingScans.delete(scanKey); 
-        res.json({ success: true });
-        console.log(`Scan completed for archive: ${archive}`,files.length);
-    })
-    .catch(err => {
-        pendingScans.delete(scanKey);
-        console.error("Errore durante la scansione:", err);
-        res.status(500).json({ error: "Errore durante la scansione" });
-    });
+    }
+    const scanPromise = readThumbnailFromArchive(archive)
+        .then((files) => {
+            pendingScans.delete(scanKey);
+            res.json({ success: true });
+            console.log(`Scan completed for archive: ${archive}`, files.length);
+        })
+        .catch(err => {
+            pendingScans.delete(scanKey);
+            console.error("Errore durante la scansione:", err);
+            res.status(500).json({ error: "Errore durante la scansione" });
+        });
     pendingScans.set(scanKey, scanPromise);
 
 });
@@ -458,4 +459,19 @@ router.get("/records/detail", async (req, res) => {
         res.status(500).json({ error: "Errore durante la lettura del record" });
     }
 });
+var Runner = false;
+router.post("/jobs/runner", async (req, res) => {
+    const { sourceDir, destDir, archive, runner,formato } = req.body ?? {};
+    console.log(req.body);
+    if (Runner) {
+        res.status(409).json({ error: "Attività già in corso per questo profilo" });
+        return;
+    }
+    Runner = true;
+    analisiFromArchive(archive, runner, { baseDir: destDir, formato: formato })
+        .then(result => res.json({ success: true, result: result.length }))
+        .catch(error => res.status(500).json({ error: error.message }))
+        .finally(() => { Runner = false; });
+});
+
 export default router;

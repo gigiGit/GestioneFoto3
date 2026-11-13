@@ -1,3 +1,4 @@
+
 const appStatus = document.getElementById("app-status");
 const profileSelector = document.getElementById("saved-profiles");
 const profileForm = document.querySelector("#profile-form");
@@ -112,10 +113,6 @@ profileSelector.addEventListener("change", () => {
     console.log("change:", profileSelector);
     if (profileSelector.value) loadProfile(profileSelector.value);
 });
-jobScan.addEventListener("click", () => startScan("scan"));
-jobExif.addEventListener("click", () => startScan("exif"));
-jobAnalisi.addEventListener("click", () => startScan("analisi"));
-jobThumbnail.addEventListener("click", () => startScan("thumbnail"));
 
 
 
@@ -143,7 +140,7 @@ async function startScan(type = "scan") {
         const response = await fetch(`/api/jobs/${type}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileName: profile.name, scanDir: profile.scanDir, sourceDir: profile.sourceFolders , archive: profile.archive })
+            body: JSON.stringify({ profileName: profile.name, scanDir: profile.scanDir, sourceDir: profile.sourceFolders, archive: profile.archive })
         });
         const data = await response.json();
         console.log(data);
@@ -156,13 +153,43 @@ async function startScan(type = "scan") {
 
 
 
-
-
-jobCopia.addEventListener("click", () => {
-    requestJson("/api/jobs/copia").then(statusCode => {
-        console.log(statusCode);
-    })
-})
+function disableJobButtons(disabled) {
+    jobScan.disabled = disabled;
+    jobExif.disabled = disabled;
+    jobAnalisi.disabled = disabled;
+    jobThumbnail.disabled = disabled;
+    jobCopia.disabled = disabled;
+}
+jobScan.addEventListener("click", () => startJob("scan"));
+jobExif.addEventListener("click", () => startJob("exif"));
+jobAnalisi.addEventListener("click", () => startJob("analisi"));
+jobThumbnail.addEventListener("click", () => startJob("thumbnail"));
+jobCopia.addEventListener("click", () => startJob("copia"));
+//jobAlbum.addEventListener("click", () => startJob("album"));
+//jobBackup.addEventListener("click", () => startJob("backup"));
+function startJob(type) {
+    disableJobButtons(true);
+    requestJson("/api/jobs/runner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            sourceDir: profileForm.elements.sourceFolders.value,
+            destDir: profileForm.elements.destDir.value,
+            archive: profileForm.elements.archive.value,
+            scanDir: profileForm.elements.scanDir.value,
+            verbose: profileForm.elements.verbose.checked,
+            batchSize: Number(profileForm.elements.batchSize.value),
+            minSize: Number(profileForm.elements.minSize.value),
+            extensions: profileForm.elements.extensions.value.split(",").map(ext => ext.trim()).filter(Boolean),
+            albumPath: profileForm.elements.albumPath.value,
+            backupPath: profileForm.elements.backupPath.value,
+            formato:"YYYYMM",
+            runner: type
+        })
+    }).then(message => {
+        console.log(message);
+    }).finally(() => disableJobButtons(false));
+}
 
 
 function ShowPanel(id) {
