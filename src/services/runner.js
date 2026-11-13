@@ -88,10 +88,10 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
     const THUMBNAIL_SIZE = 400;
     const THUMBNAIL_VERSION = 2;
 
-    const { force = false } = parametri;
+    const { force = false ,verbose} = parametri;
     const extension = path.extname(file.fullname).toLowerCase();
     if (!supportedExtensions.has(extension)) return true;
-    if (!(!force || !file.thumbnail || file.valido === false))   
+    if (!force && file.thumbnail && file.valido !== false)   
         return true;
     try {
         const thumbnail = await sharp(file.fullname)
@@ -100,6 +100,7 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
             .jpeg({ quality: 80 })
             .toBuffer();
         file.thumbnail = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
+        if(verbose) console.log(`Generated thumbnail for ${file.fullname}`);
         pendingFiles.push(file);
         return true;
     } catch (error) {
