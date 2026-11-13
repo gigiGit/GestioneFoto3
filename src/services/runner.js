@@ -91,8 +91,8 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
     const { force = false } = parametri;
     const extension = path.extname(file.fullname).toLowerCase();
     if (!supportedExtensions.has(extension)) return true;
-    //if (!force && !file.thumbnail && file.valido)
-    //    return true;
+    if (!(!force || !file.thumbnail || file.valido === false))   
+        return true;
     try {
         const thumbnail = await sharp(file.fullname)
             .rotate()
