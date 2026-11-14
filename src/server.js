@@ -35,7 +35,7 @@ app.use((req, res) => {
 });
 
 // Carica gli archivi prima di accettare richieste
-await initializeArchiveCache();
+//await initializeArchiveCache();
 
 // Avvio server
 app.listen(PORT, () => {

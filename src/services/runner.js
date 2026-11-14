@@ -5,16 +5,21 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 
-export async function copia(file, pendingFiles, { force = false, destDir = ".", backupDir = ".", formato = "YYYYMM", verbose = 0 }) {
-    if (!file.valido) return;
+export async function copia(file, pendingFiles, { force =false, destDir , backupPath , formato , verbose }) {
+    if (!file.valido) return false;
     const data = new Date(file.dt_valida)
     const anno = data.getFullYear();
     const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
     const giorno = String(data.getDate()).padStart(2, '0');
     const dataFormattata = formato === "YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese}`;
     const destinationDir = dataFormattata;
-    const destPath = path.join(destDir, backupDir, destinationDir, file.name);
-    if (fs.existsSync(destPath) && !force) return false;
+    const destPath = path.join(destDir, backupPath, destinationDir, file.name);
+    if (fs.existsSync(destPath) && !force) {
+        if(file.destPath) return false;
+        file.destPath = destinationDir;
+        pendingFiles.push(file);
+        return true;
+    }
     // Implement the copy functionality here
     try {
         if(verbose > 1) console.log(`Copying file ${file.fullname} to ${destPath}`);
@@ -47,9 +52,9 @@ export async function hashFile(file, pendingFiles, { force = false }) {
     }
 }
 
-export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir = ".", backupDir = "backup", albumPath = "albums" }) {
+export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir , backupPath , albumPath  }) {
     if (!file.valido) return false;
-    const srcPath = path.join(destDir, backupDir, file.destPath, file.name);
+    const srcPath = path.join(destDir, backupPath, file.destPath, file.name);
     if (fs.existsSync(srcPath)) {
         for (const album of file.albums) {
             const destPath = path.join(destDir, albumPath, album, file.name);
@@ -71,10 +76,11 @@ export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir = "."
 
 
 export async function analisiExif(file, pendingFiles, parametri) {
+    if (!file.valido) return false;
     const unsupportedExtensions = new Set([".mpg", ".pdf", ".m4v", ".wmv", ".mp4", ".mov", ".avi", ".mkv", ".gif", ".3gp", ".bmp"]);
     const ext = file.ext.toLowerCase();
     if (unsupportedExtensions.has(ext)) return false;
-    if (!file.valido) return false;
+    
     const { force = false } = parametri;
     if (!force && (file.exifCreateDate || file.exifDateTimeOriginal || file.exifGPSDateStamp || file.exifModifyDate)) {
         return false;
@@ -93,12 +99,14 @@ export async function analisiExif(file, pendingFiles, parametri) {
         file.exifDateTimeOriginal = null;
         file.exifGPSDateStamp = null;
         file.exifModifyDate = null;
-        return false;
+        pendingFiles.push(file);
+        return true;
     }
 }
 
 
 export async function analisiThumbnail(file, pendingFiles, parametri) {
+    if (!file.valido) return false;
     const supportedExtensions = new Set([
         ".jpg", ".jpeg", ".tif", ".tiff", ".nef", ".png", ".webp", ".heic", ".heif", ".avif"
     ]);
@@ -107,8 +115,8 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
 
     const { force = false, verbose } = parametri;
     const extension = path.extname(file.fullname).toLowerCase();
-    if (!supportedExtensions.has(extension)) return true;
-    if (!force && file.thumbnail && file.valido !== false)
+    if (!supportedExtensions.has(extension)) return false;
+    if (!force && file.thumbnail )
         return false;
     try {
         const thumbnail = await sharp(file.fullname)
@@ -117,7 +125,8 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
             .jpeg({ quality: 80 })
             .toBuffer();
         file.thumbnail = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
-        if (verbose) console.log(`Generated thumbnail for ${file.fullname}`);
+        file.valido=true;
+        if (verbose>1) console.log(`Generated thumbnail for ${file.fullname}`);
         pendingFiles.push(file);
         return true;
     } catch (error) {
@@ -125,7 +134,7 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
         file.thumbnail = null;
         file.valido = false;
         pendingFiles.push(file);
-        return false;
+        return true;
     }
 }
 export function toLocalISOString(date) {
@@ -148,7 +157,6 @@ export async function analisiAlbum(file, pendingFiles, { force = false }) {
         const normalizedPath = path.normalize(file.fullname);
         const dirs = normalizedPath.split(path.sep);
         file.albums = dirs.slice(1, -1);
-        file.valido = true;
         pendingFiles.push(file);
         return true;
     } catch (error) {

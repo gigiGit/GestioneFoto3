@@ -3,9 +3,8 @@ import express from 'express';
 const router = express.Router();
 import fs from 'fs';
 import path from 'path';
-import { readExifFromArchive, readThumbnailFromArchive } from '../services/scan-analyze.js';
-import {analisiFromArchive} from '../services/scanner.js';
-
+import { analisiFromArchive, scanSource } from '../services/scanner.js';
+import { readSomeRecords, writeArchiveFiles, selectValidDuplicate, updateArchiveRecord } from '../services/scan-archive.cjs';
 const profili = {};
 // API di verifica server
 router.get('/health', (req, res) => {
@@ -31,23 +30,12 @@ import {
     loadProfile,
     saveProfile
 } from '../services/profileManager.js';
-import { readArchiveFiles, writeArchiveFiles, selectValidDuplicate, updateArchiveRecord } from '../services/scan-archive.cjs';
 
-const recordsByProfile = new Map();
+
+
 const archiveByProfile = new Map();
 const pendingScans = new Map();
 
-async function loadProfileArchive(profileName, archivePath) {
-    const resolvedPath = path.resolve(archivePath);
-    archiveByProfile.set(profileName, resolvedPath);
-    if (!fs.existsSync(resolvedPath)) {
-        recordsByProfile.set(profileName, []);
-        return [];
-    }
-    const records = await readArchiveFiles(resolvedPath, {}, "*");
-    recordsByProfile.set(profileName, records);
-    return records;
-}
 
 export async function initializeArchiveCache() {
     const profileFiles = await listProfiles();
@@ -73,14 +61,6 @@ export async function initializeArchiveCache() {
     }
 }
 
-function getCachedRecords(profileName) {
-    if (profileName) return recordsByProfile.get(profileName) ?? [];
-    const uniqueRecords = new Map();
-    for (const records of recordsByProfile.values()) {
-        for (const record of records) uniqueRecords.set(record.fullname, record);
-    }
-    return [...uniqueRecords.values()];
-}
 
 
 router.get("/profiles", async (req, res) => {
@@ -153,7 +133,7 @@ router.post("/profiles", async (req, res) => {
                 await loadProfileArchive(saved.name, saved.archive);
             } catch (error) {
                 console.error(`Errore caricamento archivio ${saved.name}:`, error);
-                recordsByProfile.set(saved.name, []);
+                records = [];
             }
         }
         res.json(saved);
@@ -163,101 +143,25 @@ router.post("/profiles", async (req, res) => {
     }
 });
 
-// ---- Job: scan ----
-import { scan } from '../services/scanner.js';
-import { analisi } from '../services/scan-analyze.js';
 
+var Runner = false;
 router.post("/jobs/scan", async (req, res) => {
-    const { sourceDir, archive } = req.body ?? {};
-    console.log("SourceDir:", sourceDir, "archive:", archive);
-    const scanKey = path.resolve(archive);
-    if (pendingScans.has(scanKey)) {
-        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }
-    const scanPromise = scan({ sourceDir, archive }, true)
+    const profile = req.body ?? {};
+    if (Runner) return res.status(409).json({ error: "Scansione già in corso" });
+    Runner = true;
+    scanSource(profile)
         .then((files) => {
-            pendingScans.delete(scanKey);
             res.json({ success: true });
-            console.log(`Scan completed for archive: ${archive}`, files.length);
+            console.log(`Scan completed for profile: ${profile.name}`, files.length);
         })
         .catch(err => {
-            pendingScans.delete(scanKey);
             console.error("Errore durante la scansione:", err);
             res.status(500).json({ error: "Errore durante la scansione" });
-        });
-    pendingScans.set(scanKey, scanPromise);
-
-});
-router.post("/jobs/exif", async (req, res) => {
-    const { sourceDir, archive } = req.body ?? {};
-    console.log("SourceDir:", sourceDir, "archive:", archive);
-    const scanKey = path.resolve(archive);
-    if (pendingScans.has(scanKey)) {
-        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }
-    const scanPromise = readExifFromArchive(archive)
-        .then((files) => {
-            pendingScans.delete(scanKey);
-            res.json({ success: true });
-            console.log(`Scan completed for archive: ${archive}`, files.length);
         })
-        .catch(err => {
-            pendingScans.delete(scanKey);
-            console.error("Errore durante la scansione:", err);
-            res.status(500).json({ error: "Errore durante la scansione" });
+        .finally(() => {
+            Runner = false;
         });
-    pendingScans.set(scanKey, scanPromise);
-
 });
-router.post("/jobs/analisi", async (req, res) => {
-    const { sourceDir, archive } = req.body ?? {};
-    console.log("SourceDir:", sourceDir, "archive:", archive);
-    const scanKey = path.resolve(archive);
-    if (pendingScans.has(scanKey)) {
-        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }
-    const scanPromise = analisi(archive)
-        .then((files) => {
-            pendingScans.delete(scanKey);
-            res.json({ success: true });
-            console.log(`Scan completed for archive: ${archive}`, files.length);
-        })
-        .catch(err => {
-            pendingScans.delete(scanKey);
-            console.error("Errore durante la scansione:", err);
-            res.status(500).json({ error: "Errore durante la scansione" });
-        });
-    pendingScans.set(scanKey, scanPromise);
-
-});
-router.post("/jobs/thumbnail", async (req, res) => {
-    const { sourceDir, archive } = req.body ?? {};
-    console.log("SourceDir:", sourceDir, "archive:", archive);
-    const scanKey = path.resolve(archive);
-    if (pendingScans.has(scanKey)) {
-        return res.status(409).json({ error: "Scansione già in corso per questo profilo" });
-    }
-    const scanPromise = readThumbnailFromArchive(archive)
-        .then((files) => {
-            pendingScans.delete(scanKey);
-            res.json({ success: true });
-            console.log(`Scan completed for archive: ${archive}`, files.length);
-        })
-        .catch(err => {
-            pendingScans.delete(scanKey);
-            console.error("Errore durante la scansione:", err);
-            res.status(500).json({ error: "Errore durante la scansione" });
-        });
-    pendingScans.set(scanKey, scanPromise);
-
-});
-// ---- Archivio: ricerca record ----
-async function searchArchive(filters, profileName) {
-    return filterArchiveRecords(getCachedRecords(profileName), filters);
-}
-async function getArchiveRecord(fullname, profileName) {
-    return getCachedRecords(profileName).find(file => file.fullname === fullname) ?? null;
-}
 
 const ORDER_BY_COLUMNS = new Set(["dt_valida", "name", "size"]);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -338,13 +242,22 @@ function filterArchiveRecords(sourceFiles, filters) {
     });
     return records;
 }
-
+let pathFile = {};
 router.post("/preview/list", async (req, res) => {
+    const { destDir, archive } = req.body;
+    const archivePath = path.join(destDir, archive);
+    console.log("/preview/list: called", archivePath);
+    let files = [];
+
     try {
-        const filters = parseRecordFilters(req.body ?? {});
-        const profileName = typeof req.body?.profileName === "string" ? req.body.profileName : "";
-        const records = filterArchiveRecords(getCachedRecords(profileName), filters);
-        res.json(records.map(({ fullname }) => ({ fullname })));
+        fs.accessSync(archivePath);
+        files = await readSomeRecords(archivePath);
+        pathFile = {};
+        for (const file of files) {
+            pathFile[file.fullname] = file;
+        }
+        console.log("/preview/list: called", files.length, archivePath);
+        res.json(Object.keys(pathFile));
     } catch (error) {
         console.error("/preview/list:", error);
         res.status(500).json({ error: "Errore durante la ricerca" });
@@ -437,29 +350,16 @@ router.get("/records", async (req, res) => {
     }
 });
 
-router.get("/records/detail", async (req, res) => {
-    const fullname = typeof req.query.fullname === "string" ? req.query.fullname : "";
-    const profileName = typeof req.query.profileName === "string" ? req.query.profileName : "";
-    if (!fullname) {
-        return res.status(400).json({ error: "Parametro fullname obbligatorio" });
-    }
+router.post("/records/detail", async (req, res) => {
+    const fullname = typeof req.body.fullname === "string" ? req.body.fullname : "";
     try {
-        //await waitForScans(profileName);
-        const record = await getArchiveRecord(fullname, profileName);
-        if (!record) {
-            return res.status(404).json({ error: "Record non trovato" });
-        }
-        console.log("Record trovato:", record);
-        const duplicateCount = record.hash
-            ? getCachedRecords(profileName).filter(candidate => candidate.hash === record.hash).length
-            : 0;
-        res.json({ ...record, duplicateCount });
+        res.json({ path: pathFile[fullname] });
     } catch (error) {
         console.error("/records/detail:", error);
         res.status(500).json({ error: "Errore durante la lettura del record" });
     }
 });
-var Runner = false;
+
 router.post("/jobs/runner", async (req, res) => {
     const parametri = req.body ?? {};
     console.log(req.body);
@@ -468,8 +368,8 @@ router.post("/jobs/runner", async (req, res) => {
         return;
     }
     Runner = true;
-    analisiFromArchive(parametri.runner,parametri.profile)
-        .then(result => res.json({ success: true, count: result.count, errorCount: result.errorCount,files: result.files }))
+    analisiFromArchive(parametri.runner, parametri.profile)
+        .then(result => res.json({ success: true, count: result.count, errorCount: result.errorCount, files: result.files }))
         .catch(error => res.status(500).json({ error: error.message }))
         .finally(() => { Runner = false; });
 });

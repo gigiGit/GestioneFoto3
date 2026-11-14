@@ -138,15 +138,15 @@ jobAlbum.addEventListener("click", () => startJob("album"));
 //jobBackup.addEventListener("click", () => startJob("backup"));
 function startJob(type) {
     disableJobButtons(true);
-    const parametri  = getProfileData();
-   
+    const parametri = getProfileData();
+
     requestJson("/api/jobs/runner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({profile: parametri,runner:type})
+        body: JSON.stringify({ profile: parametri, runner: type })
     }).then(message => {
-        console.log("Elaborati:",message.count);
-         console.log("Errori:", message.errorCount);
+        console.log("Elaborati:", message.count);
+        console.log("Errori:", message.errorCount);
     }).finally(() => disableJobButtons(false));
 }
 
@@ -208,14 +208,16 @@ function resetFilters() {
 // ---- 2) Esecuzione query ----
 async function runQuery(filters) {
     setQueryStatus("Ricerca in corso...");
+    const parametri = getProfileData();
     try {
         const response = await fetch("/api/preview/list", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...filters, profileName: profileSelector.value })
+            body: JSON.stringify(parametri)
         });
         if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
         const records = await response.json();
+        console.log("Letti dal server", records.length);
         if (!Array.isArray(records)) throw new Error("Risposta non valida");
         recordSet.records = records;
         recordSet.current = -1;
@@ -280,14 +282,15 @@ async function showRecord(record) {
     clearRecord();
     try {
         const detailParams = new URLSearchParams({ fullname: record.fullname, profileName: profileSelector.value });
+        requestJson("/api/records/detail?", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fullname: record.fullname })
+        });
         const response = await fetch("/api/records/detail?" + detailParams);
         if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
         const detail = await response.json();
-        console.log("Detail response:", detail);
-        if (requestId !== detailRequestId) return;
-        if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
-            throw new Error("Dettaglio non disponibile");
-        }
+        console.log(detail);
         for (const cell of recordData.querySelectorAll("[data-field]")) {
             const value = detail[cell.dataset.field];
             if (cell.type === "checkbox") {
@@ -370,28 +373,6 @@ async function saveRecord() {
     }
 }
 
-async function selectValidDuplicate() {
-    const record = recordSet.records[recordSet.current];
-    if (!record || duplicateSelectButton.disabled) return;
-
-    duplicateSelectButton.disabled = true;
-    try {
-        const response = await fetch("/api/records/duplicates/select", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileName: profileSelector.value, fullname: record.fullname })
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || `Errore HTTP: ${response.status}`);
-        await runQuery(getFilters());
-        setQueryStatus("Duplicato selezionato come unico valido");
-    } catch (error) {
-        console.error("Errore selezione duplicato:", error);
-        setQueryStatus(error.message || "Errore durante la selezione del duplicato");
-        duplicateSelectButton.disabled = false;
-    }
-}
-
 // ---- Listener preview ----
 queryForm.addEventListener("submit", event => {
     event.preventDefault();
@@ -403,7 +384,6 @@ navPrev.addEventListener("click", () => goPrev());
 navNext.addEventListener("click", () => goNext());
 navLast.addEventListener("click", () => goLast());
 navIndex.addEventListener("change", () => goToRecord(Number(navIndex.value) - 1));
-duplicateSelectButton.addEventListener("click", () => selectValidDuplicate());
 recordData.addEventListener("input", () => { recordSaveButton.disabled = false; });
 recordData.addEventListener("change", () => { recordSaveButton.disabled = false; });
 recordSaveButton.addEventListener("click", () => saveRecord());
