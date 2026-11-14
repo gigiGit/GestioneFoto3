@@ -111,7 +111,12 @@ function all(db, sql, values = []) {
 
 function deserializeAlbums(value) {
   if (value === null || value === undefined || value === "") return [];
-  const albums = JSON.parse(value);
+  let albums =[];
+  try{
+    albums = JSON.parse(value);
+  } catch (error) {
+
+  }
   if (!Array.isArray(albums) || albums.some(album => typeof album !== "string")) {
     throw new TypeError("Invalid albums value in archive record");
   }
@@ -184,6 +189,8 @@ async function readSomeRecords(archivePath, rowcount = -1) {
     else
       records = await all(db, `SELECT * FROM raw_files WHERE rowid <= ?`, [Number(rowcount)]);
     return records.map(mapArchivedRecord);
+  }catch(error) {
+    console.error(error);
   } finally {
     await closeDatabase(db);
   }
@@ -376,7 +383,8 @@ async function initDB(db) {
     thumbnail TEXT,
     albums TEXT,
     valido Integer,
-    destPath TEXT
+    destPath TEXT,
+    primary key (fullname)
   )`;
 
   try {

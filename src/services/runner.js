@@ -2,6 +2,9 @@ import path from "node:path";
 import exifr from "exifr";
 import sharp from "sharp";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+
 export async function copia(file, pendingFiles, { force = false, destDir = ".", backupDir = ".", formato = "YYYYMM" }) {
     if (!file.valido) return;
     const data = new Date(file.dt_valida)
@@ -26,6 +29,24 @@ export async function copia(file, pendingFiles, { force = false, destDir = ".", 
         console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
         return false;
     }
+}
+export async function hashFile(file, pendingFiles, { force = false }) {
+    if (!force && file.hash) return true;
+    try {
+        const Hash = await new Promise((resolve, reject) => {
+            const hash = createHash("sha256");
+            const stream = createReadStream(file.fullname);
+            stream.on("error", reject);
+            stream.on("data", chunk => hash.update(chunk));
+            stream.on("end", () => resolve(hash.digest("hex")));
+        });
+        file.hash = Hash;
+        pendingFiles.push(file);
+    } catch (error) {
+        console.error(`Error hashing file ${file.fullname}:`, error);
+        return false;
+    }
+    return true;
 }
 
 export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir = ".", backupDir = "backup", albumPath = "albums" }) {
@@ -88,10 +109,10 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
     const THUMBNAIL_SIZE = 400;
     const THUMBNAIL_VERSION = 2;
 
-    const { force = false ,verbose} = parametri;
+    const { force = false, verbose } = parametri;
     const extension = path.extname(file.fullname).toLowerCase();
     if (!supportedExtensions.has(extension)) return true;
-    if (!force && file.thumbnail && file.valido !== false)   
+    if (!force && file.thumbnail && file.valido !== false)
         return true;
     try {
         const thumbnail = await sharp(file.fullname)
@@ -100,7 +121,7 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
             .jpeg({ quality: 80 })
             .toBuffer();
         file.thumbnail = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
-        if(verbose) console.log(`Generated thumbnail for ${file.fullname}`);
+        if (verbose) console.log(`Generated thumbnail for ${file.fullname}`);
         pendingFiles.push(file);
         return true;
     } catch (error) {
@@ -125,19 +146,19 @@ export function toLocalISOString(date) {
 }
 
 export async function analisiAlbum(file, pendingFiles, { force = false }) {
-  if (!(force || file.albums === null || file.albums === undefined)) return true;
+    if (!(force || file.albums === null || file.albums === undefined)) return true;
 
-  try {
-    const normalizedPath = path.normalize(file.fullname);
-    const dirs = normalizedPath.split(path.sep);
-    file.albums = dirs.slice(1, -1);
-    file.valido = true;
-    pendingFiles.push(file);
-  } catch (error) {
-    console.error(`Error generating Albums for ${file.fullname}:`, error);
-    return false;
-  }
-  return true;
+    try {
+        const normalizedPath = path.normalize(file.fullname);
+        const dirs = normalizedPath.split(path.sep);
+        file.albums = dirs.slice(1, -1);
+        file.valido = true;
+        pendingFiles.push(file);
+    } catch (error) {
+        console.error(`Error generating Albums for ${file.fullname}:`, error);
+        return false;
+    }
+    return true;
 }
 
 export async function analisiDate(file, pendingFiles, { force = false }) {
