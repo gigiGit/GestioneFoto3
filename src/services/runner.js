@@ -5,23 +5,21 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 
-export async function copia(file, pendingFiles, { force = false, destDir = ".", backupDir = ".", formato = "YYYYMM" }) {
+export async function copia(file, pendingFiles, { force = false, destDir = ".", backupDir = ".", formato = "YYYYMM", verbose = 0 }) {
     if (!file.valido) return;
     const data = new Date(file.dt_valida)
     const anno = data.getFullYear();
     const mese = data.toLocaleString('it-IT', { month: 'long' }); // "novembre" (usa 'short' per "nov")
     const giorno = String(data.getDate()).padStart(2, '0');
-
     const dataFormattata = formato === "YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese}`;
-
     const destinationDir = dataFormattata;
     const destPath = path.join(destDir, backupDir, destinationDir, file.name);
-    if (fs.existsSync(destPath) && !force) return true;
-    if (file.destPath) return true;
+    if (fs.existsSync(destPath) && !force) return false;
     // Implement the copy functionality here
     try {
-        //console.log(`Copying file ${file.fullname} to ${destPath}`);
-        //await fs.copyFile(file.fullname, destPath);
+        if(verbose > 1) console.log(`Copying file ${file.fullname} to ${destPath}`);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.copyFileSync(file.fullname, destPath);
         file.destPath = destinationDir;
         pendingFiles.push(file);
         return true;
@@ -31,7 +29,7 @@ export async function copia(file, pendingFiles, { force = false, destDir = ".", 
     }
 }
 export async function hashFile(file, pendingFiles, { force = false }) {
-    if (!force && file.hash) return true;
+    if (!force && file.hash) return false;
     try {
         const Hash = await new Promise((resolve, reject) => {
             const hash = createHash("sha256");
@@ -42,45 +40,44 @@ export async function hashFile(file, pendingFiles, { force = false }) {
         });
         file.hash = Hash;
         pendingFiles.push(file);
+        return true;
     } catch (error) {
         console.error(`Error hashing file ${file.fullname}:`, error);
         return false;
     }
-    return true;
 }
 
 export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir = ".", backupDir = "backup", albumPath = "albums" }) {
-    if (!file.valido) return;
+    if (!file.valido) return false;
     const srcPath = path.join(destDir, backupDir, file.destPath, file.name);
-    for (const album of file.albums) {
-        const destPath = path.join(destDir, albumPath, album, file.name);
-        try {
-            if (verbose > 1) console.log(`Linking file ${srcPath} to ${destPath}`);
-            //await fs.symlink(srcPath, destPath);
-        } catch (error) {
-            console.error(`Error linking file ${srcPath} to ${destPath}:`, error);
+    if (fs.existsSync(srcPath)) {
+        for (const album of file.albums) {
+            const destPath = path.join(destDir, albumPath, album, file.name);
+            if(fs.existsSync(destPath)) continue;
+            try {
+                if (verbose > 1) console.log(`Linking file ${srcPath} to ${destPath}`);
+                fs.symlinkSync(srcPath, destPath);
+            } catch (error) {
+                console.error(`Error linking file ${srcPath} to ${destPath}:`, error);
+                return false;
+            }
         }
+        return true;
+    } else {
+        console.warn(`Source file does not exist: ${srcPath}`);
+        return false;
     }
-    // Implement the copy functionality here
-    try {
-        //console.log(`Copying file ${file.fullname} to ${destPath}`);
-        //await fs.copyFile(file.fullname, destPath);
-        //pendingFiles.push(file);
-    } catch (error) {
-        console.error(`Error copying file ${file.fullname} to ${destPath}:`, error);
-    }
-    return true;
 }
 
 
 export async function analisiExif(file, pendingFiles, parametri) {
     const unsupportedExtensions = new Set([".mpg", ".pdf", ".m4v", ".wmv", ".mp4", ".mov", ".avi", ".mkv", ".gif", ".3gp", ".bmp"]);
     const ext = file.ext.toLowerCase();
-    if (unsupportedExtensions.has(ext)) return true;
-    if (!file.valido) return true;
+    if (unsupportedExtensions.has(ext)) return false;
+    if (!file.valido) return false;
     const { force = false } = parametri;
     if (!force && (file.exifCreateDate || file.exifDateTimeOriginal || file.exifGPSDateStamp || file.exifModifyDate)) {
-        return true;
+        return false;
     }
     try {
         const exifData = await exifr.parse(file.fullname) ?? null;
@@ -98,7 +95,6 @@ export async function analisiExif(file, pendingFiles, parametri) {
         file.exifModifyDate = null;
         return false;
     }
-    return true;
 }
 
 
@@ -113,7 +109,7 @@ export async function analisiThumbnail(file, pendingFiles, parametri) {
     const extension = path.extname(file.fullname).toLowerCase();
     if (!supportedExtensions.has(extension)) return true;
     if (!force && file.thumbnail && file.valido !== false)
-        return true;
+        return false;
     try {
         const thumbnail = await sharp(file.fullname)
             .rotate()
@@ -146,7 +142,7 @@ export function toLocalISOString(date) {
 }
 
 export async function analisiAlbum(file, pendingFiles, { force = false }) {
-    if (!(force || file.albums === null || file.albums === undefined)) return true;
+    if (!(force || file.albums === null || file.albums === undefined)) return false;
 
     try {
         const normalizedPath = path.normalize(file.fullname);
@@ -154,15 +150,14 @@ export async function analisiAlbum(file, pendingFiles, { force = false }) {
         file.albums = dirs.slice(1, -1);
         file.valido = true;
         pendingFiles.push(file);
+        return true;
     } catch (error) {
         console.error(`Error generating Albums for ${file.fullname}:`, error);
         return false;
     }
-    return true;
-}
+ }
 
 export async function analisiDate(file, pendingFiles, { force = false }) {
-
     if (force || file.dt_valida === null || file.dt_valida === undefined) {
         try {
             let bestTry = file.exifDateTimeOriginal ?? file.exifCreateDate ?? file.exifGPSDateStamp ?? file.exifModifyDate;
@@ -185,11 +180,14 @@ export async function analisiDate(file, pendingFiles, { force = false }) {
             file.dt_valida = toLocalISOString(new Date(bestTry));
             file.dateFrom = dateFrom;
             pendingFiles.push(file);
+            return true;
         } catch (error) {
             console.error(`Error generating analisiDate for ${file.fullname}:`, error);
             file.dt_valida = null;
+            return false
         }
     }
+    return false;
 }
 
 export function recuperaDataDaNome(file) {
