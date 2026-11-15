@@ -35,7 +35,7 @@ export async function analisiFromArchive(funcName, parametri) {
   const archivePath = path.join(parametri.destDir, parametri.archive);
   try {
     fs.accessSync(archivePath);
-    files.push(...await readSomeRecords(archivePath, parametri.rowcount ?? 36));
+    files.push(...await readSomeRecords(archivePath,parametri.filters));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -53,7 +53,7 @@ export async function analisiFromArchive(funcName, parametri) {
 
     break;
     case "copia": cb = copia; break;
-    case "analisiDate": cb = analisiDate;; break;
+    case "analisiDate": cb = analisiDate;break;
     case "hash": cb = hashFile; break;
     case "analisiAlbum": cb = analisiAlbum; break;
     default:
@@ -61,7 +61,7 @@ export async function analisiFromArchive(funcName, parametri) {
   }
   if (!option.count) option.count = 500;
 
-  console.log(`Starting analysis for function: ${funcName}`);
+  console.log(`Starting analysis for function: ${funcName} Files da analizzare ${files.length}`);
   console.log("archivePath:", archivePath);
   const dt2 = new Date();
   console.log(`Time elapsed since start: ${dt2 - dt1} ms`);

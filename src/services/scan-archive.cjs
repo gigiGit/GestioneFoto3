@@ -180,15 +180,13 @@ async function readArchiveFiles(archivePath, filters = {}, sellist = "*") {
     await closeDatabase(db);
   }
 }
-async function readSomeRecords(archivePath, rowcount = -1) {
+async function readSomeRecords(archivePath, filters =null) {
   console.log("Lettura record dall'archivio", archivePath);
   const db = await openReadOnlyDatabase(path.resolve(archivePath));
   var records;
-  try {
-    if (rowcount < 0)
-      records = await all(db, `SELECT * FROM raw_files`);
-    else
-      records = await all(db, `SELECT * FROM raw_files WHERE rowid <= ?`, [Number(rowcount)]);
+  const WHERE=filters ? "where " + filters : "";
+  try {  
+    records = await all(db, `SELECT * FROM raw_files ${WHERE}`);
     console.log("Record letti:", records.length);
     return records.map(mapArchivedRecord);
   }catch(error) {
