@@ -3,7 +3,7 @@ import { analisiFromArchive,scanSource} from './services/scanner.js';
 const profilo = {
   archive: "archive-2.db",
   sourceFolders: "E:\\",
-  destDir: "C:\\ArchivioFoto",
+  destDir: "F:\\ArchivioFoto",
   scanDir: "scan",
   backupPath: "backup",
   albumPath: "albums",
