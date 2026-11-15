@@ -4,6 +4,20 @@ import sharp from "sharp";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+export async function changeFileDate(file, pendingFiles, { force = false, destDir, backupPath, formato, verbose }) {
+    if (!file.valido && !file.dt_valida) return false;
+    const data = new Date(file.dt_valida)
+    const destPath = path.join(destDir, backupPath, file.destPath, file.name);
+    try {
+        console.log(`Changing file date for ${destPath}:`, data);
+        fs.utimesSync(destPath, data, data);
+        file.createdAt = file.dt_valida;
+        return true;
+    } catch (error) {
+        console.error(`Error changing file date for ${destPath}:`, error);
+        return false;
+    }
+}
 
 export async function copia(file, pendingFiles, { force = false, destDir, backupPath, formato, verbose }) {
     if (!file.valido && !file.dt_valida) return false;
@@ -14,7 +28,7 @@ export async function copia(file, pendingFiles, { force = false, destDir, backup
     const dataFormattata = formato === "YYYYMMDD" ? `${anno}${path.sep}${mese}${path.sep}${giorno}` : `${anno}${path.sep}${mese}`;
     const destinationDir = dataFormattata;
     const destPath = path.join(destDir, backupPath, destinationDir, file.name);
-    if (fs.existsSync(destPath) ) {
+    if (fs.existsSync(destPath)) {
         if (file.destPath) return false;
         file.destPath = destinationDir;
         pendingFiles.push(file);
@@ -167,45 +181,45 @@ export async function analisiAlbum(file, pendingFiles, { force = false }) {
     }
 }
 
-export async function analisiDate(file, pendingFiles, { force = false,verbose=0 }) {
-if(verbose>1) console.log(`Starting analisiDate for ${file.fullname}`);
-//casi particolari
-if(file.name ==="IMG_2145.1.jpg" ||
-   file.name ==="IMG_2146.1.jpg" ||
-   file.name ==="IMG_2147.1.jpg" ||
-   file.name ==="IMG_2148.1.jpg" ||
-   file.name ==="IMG_2149.1.jpg" ||
-   file.name ==="IMG_2150.1.jpg" ||
-   file.name ==="IMG_2151.1.jpg" ||
-   file.name ==="IMG_2152.1.jpg" ||
-   file.name ==="IMG_2153.1.jpg" ||
-   file.name ==="img_2145.1.jpg" ||
-   file.name ==="img_2146.1.jpg" ||
-   file.name ==="img_2147.1.jpg" ||
-   file.name ==="img_2148.1.jpg" ||
-   file.name ==="img_2149.1.jpg" ||
-   file.name ==="img_2150.1.jpg" ||
-   file.name ==="img_2151.1.jpg" ||
-   file.name ==="img_2152.1.jpg" ||
-   file.name ==="img_2153.1.jpg") {
-    if(verbose>1) console.log(`Special case for ${file.fullname}`);
-    file.exifCreateDate = "2011-06-01T00:00:00.000Z";
-    file.exifDateTimeOriginal = "2011-06-01T00:00:00.000Z";
-    file.exifModifyDate = "2011-06-01T00:00:00.000Z";
-    file.dt_valida=  "2011-06-01T00:00:00.000Z";
-    pendingFiles.push(file);
-    return true;
-}
-try {
+export async function analisiDate(file, pendingFiles, { force = false, verbose = 0 }) {
+    if (verbose > 1) console.log(`Starting analisiDate for ${file.fullname}`);
+    //casi particolari
+    if (file.name === "IMG_2145.1.jpg" ||
+        file.name === "IMG_2146.1.jpg" ||
+        file.name === "IMG_2147.1.jpg" ||
+        file.name === "IMG_2148.1.jpg" ||
+        file.name === "IMG_2149.1.jpg" ||
+        file.name === "IMG_2150.1.jpg" ||
+        file.name === "IMG_2151.1.jpg" ||
+        file.name === "IMG_2152.1.jpg" ||
+        file.name === "IMG_2153.1.jpg" ||
+        file.name === "img_2145.1.jpg" ||
+        file.name === "img_2146.1.jpg" ||
+        file.name === "img_2147.1.jpg" ||
+        file.name === "img_2148.1.jpg" ||
+        file.name === "img_2149.1.jpg" ||
+        file.name === "img_2150.1.jpg" ||
+        file.name === "img_2151.1.jpg" ||
+        file.name === "img_2152.1.jpg" ||
+        file.name === "img_2153.1.jpg") {
+        if (verbose > 1) console.log(`Special case for ${file.fullname}`);
+        file.exifCreateDate = "2011-06-01T00:00:00.000Z";
+        file.exifDateTimeOriginal = "2011-06-01T00:00:00.000Z";
+        file.exifModifyDate = "2011-06-01T00:00:00.000Z";
+        file.dt_valida = "2011-06-01T00:00:00.000Z";
+        pendingFiles.push(file);
+        return true;
+    }
+    try {
         let bestTry = file.exifDateTimeOriginal ?? file.exifCreateDate ?? file.exifGPSDateStamp ?? file.exifModifyDate;
         if (!(bestTry > "1900" && bestTry < "2030")) {
             bestTry = null;
         }
-        if(verbose>1) console.log(`EXIF Best try for ${file.fullname}: ${bestTry}`);
+        if (verbose > 1) console.log(`EXIF Best try for ${file.fullname}: ${bestTry}`);
         var dateFrom = "exif";
         if (bestTry === null || bestTry === undefined) {
             bestTry = recuperaDataDaNome(file);
-            if(verbose>1) console.log(`recuperaDataDaNome Best try for ${file.fullname}: ${bestTry}`);
+            if (verbose > 1) console.log(`recuperaDataDaNome Best try for ${file.fullname}: ${bestTry}`);
             if (bestTry > "1900" && bestTry < "2030") {
                 var dateFrom = "Nome";
             } else {
@@ -233,7 +247,7 @@ export function recuperaDataDaNome(file) {
     function isOraValid(txt) {
         return Number(txt) ? Number(txt) % 60 : "00";
     }
-    const filename =file.name.toLowerCase();
+    const filename = file.name.toLowerCase();
     console.log(`Checking filename: ${filename}`);
     if (filename.startsWith("fotoscandiano")) {
         return "1950-01-01T00:00:00.000Z";
@@ -242,11 +256,11 @@ export function recuperaDataDaNome(file) {
         return "1961-01-07T00:00:00.000Z";
     }
     var patt6 = [/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/, /(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})/, /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/, /(\d{4})(\d{2})(\d{2})_(\d{2})-(\d{2})-(\d{2})/,
-        /screenshot_(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/,/vid_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/,
-        /vid-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/,/vid(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/ ];
-    var patt3=[/img-(\d{4})(\d{2})(\d{2})-wa/,
+        /screenshot_(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, /vid_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/,
+        /vid-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, /vid(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/];
+    var patt3 = [/img-(\d{4})(\d{2})(\d{2})-wa/,
         /vid-(\d{4})(\d{2})(\d{2})-wa/
-];
+    ];
 
     for (const p of patt6) {
         if (filename.match(p)) {
@@ -268,8 +282,8 @@ export function recuperaDataDaNome(file) {
     }
     if (file.albums && file.albums[0]) {
         return file.albums[0]
-        .replace("Gennaio", "01")
-        .replace("Febbraio", "02")
+            .replace("Gennaio", "01")
+            .replace("Febbraio", "02")
             .replace("Marzo", "03")
             .replace("Aprile", "04")
             .replace("Maggio", "05")
@@ -279,7 +293,7 @@ export function recuperaDataDaNome(file) {
             .replace("Settembre", "09")
             .replace("Ottobre", "10")
             .replace("Novembre", "11")
-            .replace("Dicembre", "12")+"T00:00:00.000Z";
+            .replace("Dicembre", "12") + "T00:00:00.000Z";
     }
 
 
