@@ -9,9 +9,10 @@ export async function changeFileDate(file, pendingFiles, { force = false, destDi
     const data = new Date(file.dt_valida)
     const destPath = path.join(destDir, backupPath, file.destPath, file.name);
     try {
-        console.log(`Changing file date for ${destPath}:`, data);
+        if(verbose>1) console.log(`Changing file date for ${destPath}:`, data);
         fs.utimesSync(destPath, data, data);
         file.createdAt = file.dt_valida;
+        pendingFiles.push(file);
         return true;
     } catch (error) {
         console.error(`Error changing file date for ${destPath}:`, error);
