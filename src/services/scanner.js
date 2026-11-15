@@ -9,7 +9,23 @@ export const SCAN_FILE_NAME = "scan.json";
  * Carica i record dall'archivio ed esegue l'operazione richiesta sui file.
  * @returns {Promise<{ scanFile: string, files: object[] }>}
  */
-
+function canCreateSymlinks(targetDir) {
+const testLink = path.join(targetDir, `.symlink_test_${Date.now()}`);
+  try {
+    // Tenta di creare un symlink fittizio nella cartella
+    fs.symlinkSync('.', testLink);
+    // Se riesce, lo rimuove subito
+    fs.unlinkSync(testLink);
+    return true;
+  } catch (err) {
+    // Su exFAT o FAT32 verrà sollevata un'eccezione
+    return false;
+  }
+}
+async function noLink(file, pendingFiles, option) {
+  console.warn(`Cannot create symlinks for file: ${file.fullname}`);
+  return false;
+}
 export async function analisiFromArchive(funcName, parametri) {
   let count = 0;
   let errorCount = 0;
@@ -29,7 +45,13 @@ export async function analisiFromArchive(funcName, parametri) {
   switch (funcName) {
     case "exif": cb = analisiExif; break;
     case "thumbnail": cb = analisiThumbnail; break;
-    case "linkAlbum": cb = linkAlbum; break;
+    case "linkAlbum":
+      cb = linkAlbum; 
+      if (!canCreateSymlinks(parametri.destDir)) {
+        cb=noLink;
+      }
+
+    break;
     case "copia": cb = copia; break;
     case "analisiDate": cb = analisiDate;; break;
     case "hash": cb = hashFile; break;

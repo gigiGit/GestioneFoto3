@@ -9,7 +9,7 @@ const profilo = {
   albumPath: "albums",
   batchSize: 500,
   minSize: 0,
-  verbose: 2,
+  verbose: 1,
   simulazione: true,
   force:false,
   formato: "YYYYMMDD",

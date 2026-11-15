@@ -58,6 +58,7 @@ export async function linkAlbum(file, pendingFiles, { verbose = 0, destDir , bac
     if (fs.existsSync(srcPath)) {
         for (const album of file.albums) {
             const destPath = path.join(destDir, albumPath, album, file.name);
+            fs.mkdirSync(path.dirname(destPath), { recursive: true });
             if(fs.existsSync(destPath)) continue;
             try {
                 if (verbose > 1) console.log(`Linking file ${srcPath} to ${destPath}`);
